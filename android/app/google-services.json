@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "286525446808",
+    "project_id": "smartlog-b9b37",
+    "storage_bucket": "smartlog-b9b37.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:286525446808:android:14c7e90b8319f5a50b0eed",
+        "android_client_info": {
+          "package_name": "com.example.smartlife"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDTYpJ68WmIA346_bVt_W3yPEXiNPe87pQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

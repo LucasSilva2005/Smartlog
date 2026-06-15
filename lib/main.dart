@@ -1,8 +1,52 @@
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
-void main() {
+Future<void> buscarPedidos() async {
+  final response = await http.get(
+    Uri.parse(
+      'https://jsonplaceholder.typicode.com/posts',
+    ),
+  );
+
+  if (response.statusCode == 200) {
+    final dados = jsonDecode(response.body);
+
+    print(dados);
+  }
+}
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp();
+
   runApp(const SmartLifeApp());
 }
+
+Future<void> configurarFCM() async {
+  FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+  await messaging.requestPermission();
+
+  String? token = await messaging.getToken();
+
+  print("TOKEN FCM:");
+  print(token);
+
+  FirebaseMessaging.onMessage.listen(
+        (RemoteMessage message) {
+      print(
+        'Nova notificação: ${message.notification?.title}',
+      );
+    },
+  );
+}
+
+
 
 class SmartLifeApp extends StatelessWidget {
   const SmartLifeApp({super.key});
@@ -563,6 +607,50 @@ class TrackingScreen extends StatelessWidget {
   }
 }
 
+class MapScreen extends StatelessWidget {
+  const MapScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Mapa Logístico'),
+      ),
+      body: GoogleMap(
+        initialCameraPosition: const CameraPosition(
+          target: LatLng(-23.5505, -46.6333),
+          zoom: 12,
+        ),
+        markers: {
+          const Marker(
+            markerId: MarkerId('centro'),
+            position: LatLng(-23.5505, -46.6333),
+            infoWindow: InfoWindow(
+              title: 'Centro de Distribuição',
+            ),
+          ),
+
+          const Marker(
+            markerId: MarkerId('motorista'),
+            position: LatLng(-23.5600, -46.6400),
+            infoWindow: InfoWindow(
+              title: 'Motorista Carlos Silva',
+            ),
+          ),
+
+          const Marker(
+            markerId: MarkerId('pedido'),
+            position: LatLng(-23.5700, -46.6500),
+            infoWindow: InfoWindow(
+              title: 'Pedido #1003',
+            ),
+          ),
+        },
+      ),
+    );
+  }
+}
+
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
@@ -570,13 +658,15 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: const Color(0xFF0F172A),
+        foregroundColor: Colors.white,
         title: const Text('Meu Perfil'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
+      body: const Padding(
+        padding: EdgeInsets.all(20),
         child: Column(
           children: [
-            const CircleAvatar(
+            CircleAvatar(
               radius: 50,
               child: Icon(
                 Icons.person,
@@ -584,9 +674,9 @@ class ProfileScreen extends StatelessWidget {
               ),
             ),
 
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
 
-            const Text(
+            Text(
               'Lucas Ferreira',
               style: TextStyle(
                 fontSize: 22,
@@ -594,21 +684,21 @@ class ProfileScreen extends StatelessWidget {
               ),
             ),
 
-            const Text('Operador Logístico'),
+            Text('Operador Logístico'),
 
-            const SizedBox(height: 30),
+            SizedBox(height: 30),
 
-            const ListTile(
+            ListTile(
               leading: Icon(Icons.email),
               title: Text('lucas@smartlog.com'),
             ),
 
-            const ListTile(
+            ListTile(
               leading: Icon(Icons.phone),
               title: Text('(11) 99999-9999'),
             ),
 
-            const ListTile(
+            ListTile(
               leading: Icon(Icons.business),
               title: Text('Centro de Operações SmartLog'),
             ),
@@ -619,8 +709,21 @@ class ProfileScreen extends StatelessWidget {
   }
 }
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+
+  @override
+  void initState() {
+    super.initState();
+
+    configurarFCM();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -649,6 +752,7 @@ class DashboardScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+
               const Text(
                 'Dashboard Logístico',
                 style: TextStyle(
@@ -692,6 +796,7 @@ class DashboardScreen extends StatelessWidget {
 
               Row(
                 children: [
+
                   Expanded(
                     child: Card(
                       child: Padding(
@@ -832,6 +937,25 @@ class DashboardScreen extends StatelessWidget {
                 ),
               ),
 
+              Card(
+                child: ListTile(
+                  leading: const Icon(
+                    Icons.map,
+                    color: Color(0xFFF97316),
+                  ),
+                  title: const Text('Mapa Logístico'),
+                  trailing: const Icon(Icons.arrow_forward_ios),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const MapScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
               const SizedBox(height: 25),
 
               Container(
@@ -868,3 +992,4 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 }
+
