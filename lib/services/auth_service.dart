@@ -17,29 +17,34 @@ class AuthService {
     }
   }
 
-  // Cadastro de Novo Usuário (Salva no Auth e cria o perfil na coleção 'users')
-  Future<UserCredential> cadastrarUsuario({
+// Cadastro de Novo Usuário (Ajustado para a Solução 2: Multi-Tenant + E-mail Nativo)
+  Future<void> cadastrarUsuario({
     required String nome,
     required String email,
     required String senha,
-    required String tipo, // Administrador, Motorista, Cliente
+    required String tipo,
+    required String empresaId, // Tag essencial do Multi-Tenant
   }) async {
     try {
+      // 1. Cria a credencial de acesso oficial no Firebase Authentication
       UserCredential cred = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: senha,
       );
 
-      if (cred.user != null) {
-        // Cria o documento do usuário na coleção especificada no escopo do projeto
-        await _db.collection('users').doc(cred.user!.uid).set({
-          'uid': cred.user!.uid,
-          'nome': nome,
-          'email': email,
-          'tipo': tipo,
-        });
-      }
-      return cred;
+      // 2. DISPARA O E-MAIL NATIVO DE VERIFICAÇÃO (O que estava faltando!)
+      await cred.user?.sendEmailVerification();
+
+      // 3. Salva o perfil com os dados logísticos na coleção 'users' do Firestore
+      await _db.collection('users').doc(cred.user?.uid).set({
+        'uid': cred.user?.uid,
+        'nome': nome,
+        'email': email,
+        'tipo': tipo.toUpperCase(),
+        'empresaId': empresaId,
+        'status': 'PENDENTE', // Fica pendente até ele clicar no link do e-mail
+        'dataCadastro': FieldValue.serverTimestamp(),
+      });
     } on FirebaseAuthException catch (e) {
       throw _tratarErroAuth(e);
     }

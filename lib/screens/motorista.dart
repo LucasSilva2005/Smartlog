@@ -1,16 +1,14 @@
-// Salve em: lib/screens/dashboard_motorista.dart
-
+// lib/screens/motorista.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../controllers/dashboard_controller.dart';
+import '../controllers/auth_controller.dart';
 
 class DashboardMotorista extends StatefulWidget {
-  final String nomeMotorista; // Passado dinamicamente após o login
-  final String regiaoDesignada; // Ex: 'Zona Sul'
+  final String regiaoDesignada;
 
   const DashboardMotorista({
     super.key,
-    this.nomeMotorista = "Carlos Silva",
     this.regiaoDesignada = "Zona Sul",
   });
 
@@ -23,30 +21,33 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
 
   @override
   Widget build(BuildContext context) {
-    // Acessando as entregas globais do controlador
-    final controller = context.watch<DashboardController>();
+    final dashboardCtrl = context.watch<DashboardController>();
+    final authCtrl = context.read<AuthController>();
 
-    // Filtrando estritamente as entregas pertencentes à região deste motorista
-    final minhasEntregas = controller.filtrarPorRegiao(widget.regiaoDesignada);
+    // Chama com segurança o método de filtragem do controller unificado
+    final minhasEntregas = dashboardCtrl.filtrarPorRegiao(widget.regiaoDesignada);
 
     return Scaffold(
       backgroundColor: const Color(0xffF5F7FA),
       appBar: AppBar(
         backgroundColor: const Color(0xff0F172A),
         foregroundColor: Colors.white,
-        title: Text("SmartLog — Rota ${widget.regiaoDesignada}"),
+        title: Text("SmartLog - Motorista (${widget.regiaoDesignada})"),
         actions: [
-          Chip(
-            label: Text(_rotaIniciada ? "EM ROTA" : "DISPONÍVEL"),
-            backgroundColor: _rotaIniciada ? Colors.orange : Colors.green,
-            labelStyle: const TextStyle(color: Colors.white, fontSize: 12),
-          ),
-          const SizedBox(width: 10),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await authCtrl.realizarLogout();
+              if (context.mounted) {
+                Navigator.of(context).pushReplacementNamed('/login');
+              }
+            },
+          )
         ],
       ),
       body: Column(
         children: [
-          // MAPA EM TELA CHEIA (Placeholder Visual do Percurso Regional)
+          // Área do Mapa Integrado
           Expanded(
             flex: 4,
             child: Container(
@@ -57,44 +58,31 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.navigation, size: 60, color: Colors.blue),
+                        Icon(Icons.map, size: 64, color: Color(0xff0F172A)),
                         SizedBox(height: 8),
                         Text(
-                          "Google Maps Ativo",
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                          "Google Maps integrado em tempo real",
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          "Exibindo sequência otimizada de 5 entregas",
-                          style: TextStyle(fontSize: 12, color: Colors.black54),
+                          "Exibindo rota otimizada pela IA",
+                          style: TextStyle(color: Colors.grey, fontSize: 12),
                         ),
                       ],
                     ),
                   ),
-                  // Indicador Flutuante da IA de Rota
                   Positioned(
                     top: 16,
                     left: 16,
-                    right: 16,
                     child: Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.white.withAlpha(230),
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black26)],
+                        color: _rotaIniciada ? Colors.green : Colors.orange,
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.psychology, color: Colors.blue),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _rotaIniciada
-                                  ? "IA: Siga pela rota calculada para evitar o trânsito regional."
-                                  : "IA: Aguardando comando para iniciar sequência ideal.",
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        _rotaIniciada ? "EM ROTA" : "AGUARDANDO INÍCIO",
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                       ),
                     ),
                   ),
@@ -103,84 +91,73 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
             ),
           ),
 
-          // SEÇÃO DE COMPONENTES DE AÇÃO E LISTAGEM DA ROTA
+          // Painel Inferior de Paradas
           Expanded(
             flex: 5,
             child: Container(
               padding: const EdgeInsets.all(16),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                boxShadow: [BoxShadow(blurRadius: 10, color: Colors.black12)],
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.nomeMotorista,
-                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            "Total: ${minhasEntregas.length} entregas agendadas",
-                            style: const TextStyle(color: Colors.grey),
-                          ),
-                        ],
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _rotaIniciada = !_rotaIniciada;
+                        });
+                      },
+                      icon: Icon(_rotaIniciada ? Icons.stop : Icons.play_arrow),
+                      label: Text(
+                        _rotaIniciada ? "CONCLUIR PERCURSO" : "INICIAR ROTA DESIGNADA",
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
-                      // BOTÕES DE AÇÃO RÁPIDA (Fáceis de tocar na rua)
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            _rotaIniciada = !_rotaIniciada;
-                          });
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _rotaIniciada ? Colors.red : Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        ),
-                        icon: Icon(_rotaIniciada ? Icons.stop : Icons.play_arrow),
-                        label: Text(_rotaIniciada ? "Finalizar" : "Iniciar Rota"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _rotaIniciada ? Colors.red : const Color(0xff0F172A),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    "Sequência de Entregas",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  const SizedBox(height: 20),
+                  Text(
+                    "Minhas Entregas (${minhasEntregas.length} paradas)",
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff0F172A)),
                   ),
-                  const SizedBox(height: 8),
-
-                  // LISTA FILTRADA DA OPERAÇÃO DO MOTORISTA
+                  const SizedBox(height: 10),
                   Expanded(
-                    child: ListView.builder(
+                    child: minhasEntregas.isEmpty
+                        ? const Center(child: Text("Nenhuma entrega pendente para sua região."))
+                        : ListView.builder(
                       itemCount: minhasEntregas.length,
                       itemBuilder: (context, index) {
                         final entrega = minhasEntregas[index];
-
                         return Card(
-                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          margin: const EdgeInsets.symmetric(vertical: 6),
+                          elevation: 1,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           child: ListTile(
                             leading: CircleAvatar(
-                              backgroundColor: Colors.blue.withAlpha(40),
-                              child: Text("${index + 1}", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                              backgroundColor: const Color(0xff0F172A).withOpacity(0.1),
+                              child: Text(
+                                "${index + 1}º",
+                                style: const TextStyle(color: Color(0xff0F172A), fontWeight: FontWeight.bold),
+                              ),
                             ),
-                            title: Text(entrega['cliente']),
-                            subtitle: Text("ID: ${entrega['id']} | Status: ${entrega['status']}"),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.check_circle_outline, color: Colors.grey),
-                              onPressed: _rotaIniciada ? () {
-                                // Ação para simular a conclusão de uma entrega específica
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("Entrega ${entrega['id']} concluída!")),
-                                );
-                              } : null, // Desabilitado se a rota global não tiver sido iniciada
+                            title: Text(
+                              entrega['cliente']?.toString() ?? 'Cliente Oculto',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
+                            subtitle: Text("Status: ${entrega['status']?.toString() ?? 'Pendente'}"),
+                            trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
                           ),
                         );
                       },

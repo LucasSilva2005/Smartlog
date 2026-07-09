@@ -1,54 +1,146 @@
-// lib/controllers/dashboard_controller.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 class DashboardController extends ChangeNotifier {
-  // Simulação do banco de dados (Mocks baseados no seu cenário de SP)
-  final List<Map<String, dynamic>> _motoristas = [
-    {'id': 'm1', 'nome': 'Carlos Silva', 'regiao': 'Zona Sul', 'status': 'Em Rota', 'progresso': 0.4},
-    {'id': 'm2', 'nome': 'Marcos Souza', 'regiao': 'Zona Norte', 'status': 'Aguardando IA', 'progresso': 0.0},
-    {'id': 'm3', 'nome': 'Ana Oliveira', 'regiao': 'Zona Oeste', 'status': 'Em Rota', 'progresso': 0.4},
-    {'id': 'm4', 'nome': 'Roberto Lima', 'regiao': 'Zona Leste', 'status': 'Concluído', 'progresso': 1.0},
-  ];
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  bool _carregando = false;
 
-  // 5 entregas fictícias por região (Total: 20 entregas) [cite: 13, 30]
-  final List<Map<String, dynamic>> _entregas = [
-    // ZONA SUL [cite: 13]
-    {'id': 'E01', 'cliente': 'Hortifruti Nações', 'regiao': 'Zona Sul', 'status': 'Entregue', 'motorista': 'Carlos Silva'},
-    {'id': 'E02', 'cliente': 'Supermercado Vila Sofia', 'regiao': 'Zona Sul', 'status': 'A Caminho', 'motorista': 'Carlos Silva'},
-    {'id': 'E03', 'cliente': 'Varejo Interlagos', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva'},
-    {'id': 'E04', 'cliente': 'Lojista Santo Amaro', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva'},
-    {'id': 'E05', 'cliente': 'Mercado Grajaú', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva'},
-    // ZONA NORTE [cite: 13]
-    {'id': 'E06', 'cliente': 'Supermercado Santana', 'regiao': 'Zona Norte', 'status': 'Pendente', 'motorista': 'Marcos Souza'},
-    {'id': 'E07', 'cliente': 'Hortifruti Casa Verde', 'regiao': 'Zona Norte', 'status': 'Pendente', 'motorista': 'Marcos Souza'},
-    {'id': 'E08', 'cliente': 'Lojista Tucuruvi', 'regiao': 'Zona Norte', 'status': 'Pendente', 'motorista': 'Marcos Souza'},
-    {'id': 'E09', 'cliente': 'Varejo Vila Maria', 'regiao': 'Zona Norte', 'status': 'Pendente', 'motorista': 'Marcos Souza'},
-    {'id': 'E10', 'cliente': 'Mercado Imirim', 'regiao': 'Zona Norte', 'status': 'Pendente', 'motorista': 'Marcos Souza'},
-    // ZONA OESTE [cite: 13]
-    {'id': 'E11', 'cliente': 'Hortifruti Pinheiros', 'regiao': 'Zona Oeste', 'status': 'Entregue', 'motorista': 'Ana Oliveira'},
-    {'id': 'E12', 'cliente': 'Super Lapa', 'regiao': 'Zona Oeste', 'status': 'Entregue', 'motorista': 'Ana Oliveira'},
-    {'id': 'E13', 'cliente': 'Varejo Perdizes', 'regiao': 'Zona Oeste', 'status': 'A Caminho', 'motorista': 'Ana Oliveira'},
-    {'id': 'E14', 'cliente': 'Lojista Butantã', 'regiao': 'Zona Oeste', 'status': 'Pendente', 'motorista': 'Ana Oliveira'},
-    {'id': 'E15', 'cliente': 'Mercado Pompeia', 'regiao': 'Zona Oeste', 'status': 'Pendente', 'motorista': 'Ana Oliveira'},
-    // ZONA LESTE [cite: 13]
-    {'id': 'E16', 'cliente': 'Supermercado Tatuapé', 'regiao': 'Zona Leste', 'status': 'Entregue', 'motorista': 'Roberto Lima'},
-    {'id': 'E17', 'cliente': 'Hortifruti Mooca', 'regiao': 'Zona Leste', 'status': 'Entregue', 'motorista': 'Roberto Lima'},
-    {'id': 'E18', 'cliente': 'Lojista Itaquera', 'regiao': 'Zona Leste', 'status': 'Entregue', 'motorista': 'Roberto Lima'},
-    {'id': 'E19', 'cliente': 'Varejo Penha', 'regiao': 'Zona Leste', 'status': 'Entregue', 'motorista': 'Roberto Lima'},
-    {'id': 'E20', 'cliente': 'Mercado Anália Franco', 'regiao': 'Zona Leste', 'status': 'Entregue', 'motorista': 'Roberto Lima'},
-  ];
+  bool get carregando => _carregando;
 
-  // Getters para expor os dados com segurança
-  List<Map<String, dynamic>> get motoristas => _motoristas;
+  // Listas locais alimentadas dinamicamente pelo banco de dados
+  List<Map<String, dynamic>> _entregas = [];
+  List<Map<String, dynamic>> _motoristas = [];
+  List<Map<String, dynamic>> _clientes = [];
+
   List<Map<String, dynamic>> get entregas => _entregas;
+  List<Map<String, dynamic>> get motoristas => _motoristas;
+  List<Map<String, dynamic>> get clientes => _clientes;
 
-  // Métodos de contagem inteligente para os cards informativos
   int get totalEntregas => _entregas.length;
-  int get totalMotoristasAtivos => _motoristas.where((m) => m['status'] != 'Inativo').length;
-  int get entregasConcluidas => _entregas.where((e) => e['status'] == 'Entregue').length;
+  int get totalMotoristasAtivos => _motoristas.length;
+  int get totalClientesCadastrados => _clientes.length;
 
-  // A FUNÇÃO CORRETIVA QUE ESTAVA FALTANDO AQUI: [cite: 34, 118]
+  // 🔄 Função chamada assim que o Admin entra na tela para sincronizar os dados
+  Future<void> inicializarDados(String empresaId) async {
+    _carregando = true;
+    notifyListeners();
+
+    try {
+      // Carrega os motoristas vinculados à empresa logada
+      final snapshotMotoristas = await _firestore
+          .collection('usuarios')
+          .where('empresaId', isEqualTo: empresaId)
+          .where('tipoUsuario', isEqualTo: 'MOTORISTA')
+          .get();
+
+      _motoristas = snapshotMotoristas.docs.map((doc) => doc.data()).toList();
+
+      // Carrega as entregas vinculadas à empresa logada
+      final snapshotEntregas = await _firestore
+          .collection('entregas')
+          .where('empresaId', isEqualTo: empresaId)
+          .get();
+
+      _entregas = snapshotEntregas.docs.map((doc) => doc.data()).toList();
+
+      // Se a lista de entregas do banco estiver vazia, carrega o Mock inicial para testes
+      if (_entregas.isEmpty) {
+        _entregas = [
+          {'id': 'E01', 'cliente': 'Hortifruti Nações', 'regiao': 'Zona Sul', 'status': 'Entregue', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
+          {'id': 'E02', 'cliente': 'Supermercado Vila Sofia', 'regiao': 'Zona Sul', 'status': 'A Caminho', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
+          {'id': 'E03', 'cliente': 'Varejo Interlagos', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
+          {'id': 'E04', 'cliente': 'Lojista Santo Amaro', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
+          {'id': 'E05', 'cliente': 'Mercado Grajaú', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
+        ];
+      }
+    } catch (e) {
+      debugPrint("Erro ao carregar dados do Firestore: $e");
+    } finally {
+      _carregando = false;
+      notifyListeners();
+    }
+  }
+
   List<Map<String, dynamic>> filtrarPorRegiao(String regiao) {
-    return _entregas.where((e) => e['regiao'].toString().toLowerCase() == regiao.toLowerCase()).toList();
+    return _entregas.where((e) =>
+    e['regiao'].toString().toLowerCase() == regiao.toLowerCase()).toList();
+  }
+
+  // ✉️ Criação no Auth com isolamento de App para NÃO deslogar o Admin
+  Future<bool> cadastrarMotoristaPorConvite({
+    required String nome,
+    required String email,
+    required String regiao,
+    required String empresaId,
+  }) async {
+    _carregando = true;
+    notifyListeners();
+
+    // Cria uma instância secundária do Firebase em memória para processar a criação de terceiros
+    FirebaseApp? appSecundario;
+    bool resultadoSucesso = false;
+
+    try {
+      final emailTratado = email.trim().toLowerCase();
+      const String senhaTemporaria = "SmartLog@123";
+
+      // Inicializa o app secundário temporário usando as configurações do app atual
+      appSecundario = await Firebase.initializeApp(
+        name: 'CriadorMotoristaTemp',
+        options: Firebase.app().options,
+      );
+
+      FirebaseAuth authSecundario = FirebaseAuth.instanceFor(app: appSecundario);
+
+      // 1. Cria a credencial usando a instância isolada secundária
+      UserCredential userCredential = await authSecundario.createUserWithEmailAndPassword(
+        email: emailTratado,
+        password: senhaTemporaria,
+      );
+
+      final String uidGerado = userCredential.user!.uid;
+
+      // 2. Salva os dados complementares no Cloud Firestore com a instância principal
+      await _firestore.collection('usuarios').doc(uidGerado).set({
+        'uid': uidGerado,
+        'nome': nome,
+        'email': emailTratado,
+        'regiaoDesignada': regiao,
+        'tipoUsuario': 'MOTORISTA',
+        'empresaId': empresaId,
+        'statusAtivacao': 'Aguardando Verificação',
+        'dataCadastro': FieldValue.serverTimestamp(),
+      });
+
+      // 3. Dispara o e-mail de verificação oficial do Firebase
+      await userCredential.user!.sendEmailVerification();
+
+      // 4. Atualiza a lista da memória reativamente (Sincronizado com as chaves do Firestore)
+      _motoristas.add({
+        'uid': uidGerado,
+        'nome': nome,
+        'email': emailTratado,
+        'regiaoDesignada': regiao,
+        'tipoUsuario': 'MOTORISTA',
+        'empresaId': empresaId,
+        'statusAtivacao': 'Aguardando Verificação',
+      });
+
+      resultadoSucesso = true;
+    } catch (e) {
+      debugPrint("Erro no cadastro e verificação de motorista: $e");
+      resultadoSucesso = false;
+    } finally {
+      // Garante a exclusão do app secundário para liberar memória RAM e evitar conflitos posteriores
+      if (appSecundario != null) {
+        await appSecundario.delete();
+      }
+      _carregando = false;
+      notifyListeners(); // Modifica o estado global da UI de uma vez só no final do processo
+    }
+
+    return resultadoSucesso;
   }
 }

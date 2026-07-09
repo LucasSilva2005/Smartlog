@@ -1,15 +1,22 @@
+// lib/controllers/auth_controller.dart
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AuthController extends ChangeNotifier {
   final AuthService _authService = AuthService();
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   bool _carregando = false;
   bool get carregando => _carregando;
 
   String? _erroMensagem;
   String? get erroMensagem => _erroMensagem;
+
+  // Propriedade para guardar o ID da empresa do usuário logado na sessão [cite: 2143]
+  String? _empresaIdLogada;
+  String? get empresaIdLogada => _empresaIdLogada;
 
   void _setCarregando(bool valor) {
     _carregando = valor;
@@ -28,8 +35,12 @@ class AuthController extends ChangeNotifier {
         var doc = await _authService.buscarDadosUsuario(creds.user!.uid);
         if (doc.exists && doc.data() != null) {
           Map<String, dynamic> dados = doc.data() as Map<String, dynamic>;
+
+          // Captura e salva o ID da empresa do usuário que acabou de logar [cite: 2143]
+          _empresaIdLogada = dados['empresaId'];
+
           _setCarregando(false);
-          return dados['tipo']; // Retorna 'Administrador', 'Motorista' ou 'Cliente'
+          return dados['tipoUsuario'] ?? dados['tipo']; // Aceita ambas as chaves do seu banco
         }
       }
       _setCarregando(false);
@@ -41,43 +52,61 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  // NOVO: Realiza o cadastro do usuário e salva no Firestore
-  // Ajustado para conversar perfeitamente com o seu AuthService
+  // Realiza o cadastro do usuário e injeta o tenant/empresaId de forma automatizada
   Future<bool> registrarUsuario({
     required String nome,
     required String email,
     required String senha,
     required String tipo,
+    String? nomeDaEmpresa, // Campo opcional necessário caso seja um novo Admin
   }) async {
     _setCarregando(true);
     _erroMensagem = null;
 
     try {
-      // Chama a função direto do seu AuthService, passando todos os parâmetros
-      UserCredential creds = await _authService.cadastrarUsuario(
+      String empresaIdVinculada;
+
+      if (tipo.toUpperCase() == 'ADMINISTRADOR') {
+        // Se for um novo Admin criando conta pública, gera um ID de empresa único [cite: 2145]
+        empresaIdVinculada = _db.collection('empresas').doc().id;
+
+        // Salva o registro da nova empresa no Firestore [cite: 2145]
+        await _db.collection('empresas').doc(empresaIdVinculada).set({
+          'id': empresaIdVinculada,
+          'nomeFantasia': nomeDaEmpresa ?? "Nova Empresa Logística",
+          'dataCriacao': FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Se for um motorista ou cliente criado internamente, ele herda o ID do Admin logado [cite: 2146]
+        if (_empresaIdLogada == null) {
+          throw Exception("Ação não autorizada: Admin não está logado para vincular a empresa.");
+        }
+        empresaIdVinculada = _empresaIdLogada!;
+      }
+
+      // 🔥 CORREÇÃO CRÍTICA AQUI: Apenas aguardamos a execução do void.
+      // Sem atribuir a uma variável 'creds', removendo o erro de compilação!
+      await _authService.cadastrarUsuario(
         nome: nome,
         email: email,
         senha: senha,
         tipo: tipo,
+        empresaId: empresaIdVinculada,
       );
 
-      if (creds.user != null) {
-        _setCarregando(false);
-        return true;
-      }
-
       _setCarregando(false);
-      return false;
+      return true;
     } catch (e) {
-      // Aqui ele já captura a mensagem em português tratada pelo seu Service!
       _erroMensagem = e.toString();
       _setCarregando(false);
       return false;
     }
   }
 
-  // Executa o logout
+  // Executa o logout limpando o estado da sessão
   Future<void> realizarLogout() async {
     await _authService.deslogar();
+    _empresaIdLogada = null;
+    notifyListeners();
   }
 }

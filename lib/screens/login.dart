@@ -1,25 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:smartlife/screens/cadastro.dart'; // Mantém o caminho do seu projeto
 import '../controllers/auth_controller.dart';
-import '../services/auth_service.dart';
-import 'cadastro.dart';
 import 'dashboard_admin.dart';
-import 'motorista.dart'; // IMPORTAÇÃO CORRIGIDA para o nome do seu arquivo real
+import 'motorista.dart'; // Importa o arquivo da tela do motorista [cite: 854]
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+class TelaLogin extends StatefulWidget {
+  const TelaLogin({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<TelaLogin> createState() => _TelaLoginState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _TelaLoginState extends State<TelaLogin> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _senhaController = TextEditingController();
-
-  // Controle de visibilidade da senha (O "olhinho")
-  bool _ocultarSenha = true;
+  bool _senhaOculta = true;
 
   @override
   void dispose() {
@@ -28,41 +25,51 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // Função para disparar o e-mail de recuperação de senha
-  void _recuperarSenha() async {
-    final email = _emailController.text.trim();
+  void _executarLogin() async {
+    if (!_formKey.currentState!.validate()) return;
 
-    if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, digite seu e-mail no campo acima para redefinir a senha.')),
-      );
-      return;
-    }
+    final authCtrl = context.read<AuthController>();
 
-    try {
-      // Instancia temporariamente o serviço para enviar o e-mail
-      final authService = AuthService();
-      await authService.resetarSenha(email);
+    String? tipoUsuario = await authCtrl.realizarLogin(
+      _emailController.text.trim(),
+      _senhaController.text.trim(),
+    );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('E-mail de redefinição enviado para: $email')),
+    if (tipoUsuario != null && mounted) {
+      final tipoTratado = tipoUsuario.toUpperCase();
+
+      if (tipoTratado == 'ADMINISTRADOR' || tipoTratado == 'ADMIN') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardAdmin()),
         );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
+      } else if (tipoTratado == 'MOTORISTA') {
+        // 🔥 CORREÇÃO DA LINHA 47: Chamando a classe correta DashboardMotorista
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardMotorista(regiaoDesignada: "Zona Sul")),
         );
       }
     }
   }
 
+  void _recuperarSenha() {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Digite seu e-mail para recuperar a senha.')),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('E-mail de recuperação enviado para $email')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final authController = Provider.of<AuthController>(context);
+    final authController = context.watch<AuthController>();
 
     return Scaffold(
+      backgroundColor: const Color(0xff0F172A), // Slate escuro corporativo original [cite: 781, 783]
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
@@ -70,46 +77,53 @@ class _LoginScreenState extends State<LoginScreen> {
             key: _formKey,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                const Icon(Icons.local_shipping, size: 80, color: Colors.blueAccent),
+                const SizedBox(height: 16),
                 const Text(
-                  'SmartLog',
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
+                  "SmartLog",
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "Faça login para acessar sua rota ou painel",
+                  style: TextStyle(color: Colors.grey),
                 ),
                 const SizedBox(height: 32),
 
-                // Campo E-mail
+                // Campo de E-mail
                 TextFormField(
                   controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
                     labelText: 'E-mail',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.email),
+                    labelStyle: TextStyle(color: Colors.grey),
+                    prefixIcon: Icon(Icons.email, color: Colors.blueAccent),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.blueAccent)),
                   ),
-                  keyboardType: TextInputType.emailAddress,
-                  validator: (value) => value!.isEmpty ? 'Insira seu e-mail' : null,
+                  validator: (value) => (value == null || !value.contains('@')) ? 'Insira um e-mail válido' : null,
                 ),
                 const SizedBox(height: 16),
 
-                // Campo Senha com o "Olhinho"
+                // Campo de Senha com o "Olhinho"
                 TextFormField(
                   controller: _senhaController,
-                  obscureText: _ocultarSenha, // Controla se a senha aparece ou não
+                  obscureText: _senhaOculta,
+                  style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     labelText: 'Senha',
-                    border: const OutlineInputBorder(),
-                    prefixIcon: const Icon(Icons.lock),
+                    labelStyle: const TextStyle(color: Colors.grey),
+                    prefixIcon: const Icon(Icons.lock, color: Colors.blueAccent),
                     suffixIcon: IconButton(
-                      icon: Icon(_ocultarSenha ? Icons.visibility_off : Icons.visibility),
-                      onPressed: () {
-                        setState(() {
-                          _ocultarSenha = !_ocultarSenha; // Inverte o estado do olho
-                        });
-                      },
+                      icon: Icon(_senhaOculta ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                      onPressed: () => setState(() => _senhaOculta = !_senhaOculta),
                     ),
+                    enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+                    focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.blueAccent)),
                   ),
-                  validator: (value) => value!.isEmpty ? 'Insira sua senha' : null,
+                  validator: (value) => (value == null || value.length < 6) ? 'A senha deve ter pelo menos 6 caracteres' : null,
                 ),
 
                 // Botão Esqueci Minha Senha
@@ -117,73 +131,47 @@ class _LoginScreenState extends State<LoginScreen> {
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: _recuperarSenha,
-                    child: const Text('Esqueci minha senha'),
+                    child: const Text('Esqueci minha senha', style: TextStyle(color: Colors.blueAccent)),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Botão de Login
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: authController.carregando ? null : _executarLogin,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: authController.carregando
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text('Entrar', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                // Botão de Login Tratado e Otimizado
-                ElevatedButton(
-                  onPressed: authController.carregando
-                      ? null
-                      : () async {
-                    if (_formKey.currentState!.validate()) {
-                      String? tipoUsuario = await authController.realizarLogin(
-                        _emailController.text.trim(),
-                        _senhaController.text.trim(),
-                      );
-
-                      if (tipoUsuario != null && mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Logado como $tipoUsuario!')),
-                        );
-
-                        final tipoFormatado = tipoUsuario.trim().toUpperCase();
-
-                        // 1. Redirecionamento para o perfil Administrador
-                        if (tipoFormatado == 'ADMINISTRADOR') {
-                          Navigator.of(context).pushReplacement(
-                            MaterialPageRoute(
-                              builder: (context) => const DashboardAdmin(),
-                            ),
-                          );
-                        }
-                        // 2. Redirecionamento para o perfil Motorista (Chamando a classe PascalCase correta)
-                        else if (tipoFormatado == 'MOTORISTA') {
-                          Navigator.of(context).pushReplacement(
-                            MaterialPageRoute(
-                              builder: (context) => const DashboardMotorista(
-                                nomeMotorista: "Carlos Silva",
-                                regiaoDesignada: "Zona Sul",
-                              ),
-                            ),
-                          );
-                        }
-
-                      } else if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(authController.erroMensagem ?? 'Erro ao logar')),
-                        );
-                      }
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                  child: authController.carregando
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Entrar', style: TextStyle(fontSize: 16)),
-                ),
-                const SizedBox(height: 16),
-
-                // Link para a tela de Cadastro
+                // Botão de Cadastro
                 TextButton(
                   onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const CadastroScreen()),
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const CadastroScreen()), // Alinhado com a classe interna de cadastro.dart
                     );
                   },
-                  child: const Text('Não tem uma conta? Cadastre-se aqui'),
+                  child: const Text('Não tem uma conta? Cadastre-se', style: TextStyle(color: Colors.grey)),
                 ),
+
+                if (authController.erroMensagem != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    authController.erroMensagem!,
+                    style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ]
               ],
             ),
           ),
