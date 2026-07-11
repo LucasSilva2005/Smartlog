@@ -1,9 +1,10 @@
+// lib/screens/login.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smartlife/screens/cadastro.dart'; // Mantém o caminho do seu projeto
+import 'package:smartlife/screens/cadastro.dart';
 import '../controllers/auth_controller.dart';
 import 'dashboard_admin.dart';
-import 'motorista.dart'; // Importa o arquivo da tela do motorista [cite: 854]
+import 'motorista.dart';
 
 class TelaLogin extends StatefulWidget {
   const TelaLogin({super.key});
@@ -30,9 +31,13 @@ class _TelaLoginState extends State<TelaLogin> {
 
     final authCtrl = context.read<AuthController>();
 
+    // 🔥 BLINDAGEM OPERACIONAL: Força o e-mail a ficar limpo e minúsculo
+    final emailTratado = _emailController.text.trim().toLowerCase();
+    final senhaTratada = _senhaController.text.trim();
+
     String? tipoUsuario = await authCtrl.realizarLogin(
-      _emailController.text.trim(),
-      _senhaController.text.trim(),
+      emailTratado,
+      senhaTratada,
     );
 
     if (tipoUsuario != null && mounted) {
@@ -43,25 +48,58 @@ class _TelaLoginState extends State<TelaLogin> {
           MaterialPageRoute(builder: (_) => const DashboardAdmin()),
         );
       } else if (tipoTratado == 'MOTORISTA') {
-        // 🔥 CORREÇÃO DA LINHA 47: Chamando a classe correta DashboardMotorista
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const DashboardMotorista(regiaoDesignada: "Zona Sul")),
         );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Painel do cliente em desenvolvimento.'), backgroundColor: Colors.orangeAccent),
+        );
       }
+    } else if (mounted) {
+      // 🔥 EXIBIÇÃO DO ERRO REAL: Agora exibe a mensagem retornada pelo Firebase AuthService
+      final msgErro = authCtrl.erroMensagem ?? 'Falha na autenticação. Verifique suas credenciais.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msgErro),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 5),
+        ),
+      );
     }
   }
 
-  void _recuperarSenha() {
+  void _recuperarSenha() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Digite seu e-mail para recuperar a senha.')),
+        const SnackBar(
+          content: Text('Digite seu e-mail no campo acima para recuperá-lo.'),
+          backgroundColor: Colors.orangeAccent,
+        ),
       );
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('E-mail de recuperação enviado para $email')),
-    );
+
+    final authCtrl = context.read<AuthController>();
+
+    bool enviado = await authCtrl.recuperarSenhaPorEmail(email);
+
+    if (enviado && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('E-mail de recuperação enviado para $email! Verifique sua caixa de entrada.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(authCtrl.erroMensagem ?? 'Erro ao enviar e-mail de redefinição.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 
   @override
@@ -69,7 +107,7 @@ class _TelaLoginState extends State<TelaLogin> {
     final authController = context.watch<AuthController>();
 
     return Scaffold(
-      backgroundColor: const Color(0xff0F172A), // Slate escuro corporativo original [cite: 781, 783]
+      backgroundColor: const Color(0xff0F172A),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
@@ -148,7 +186,7 @@ class _TelaLoginState extends State<TelaLogin> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     child: authController.carregando
-                        ? const CircularProgressIndicator(color: Colors.white)
+                        ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                         : const Text('Entrar', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
@@ -158,7 +196,7 @@ class _TelaLoginState extends State<TelaLogin> {
                 TextButton(
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const CadastroScreen()), // Alinhado com a classe interna de cadastro.dart
+                      MaterialPageRoute(builder: (_) => const CadastroScreen()),
                     );
                   },
                   child: const Text('Não tem uma conta? Cadastre-se', style: TextStyle(color: Colors.grey)),

@@ -17,13 +17,13 @@ class AuthService {
     }
   }
 
-// Cadastro de Novo Usuário (Ajustado para a Solução 2: Multi-Tenant + E-mail Nativo)
+  // Cadastro de Novo Usuário (Ajustado para a coleção unificada 'usuarios')
   Future<void> cadastrarUsuario({
     required String nome,
     required String email,
     required String senha,
     required String tipo,
-    required String empresaId, // Tag essencial do Multi-Tenant
+    required String empresaId,
   }) async {
     try {
       // 1. Cria a credencial de acesso oficial no Firebase Authentication
@@ -32,17 +32,17 @@ class AuthService {
         password: senha,
       );
 
-      // 2. DISPARA O E-MAIL NATIVO DE VERIFICAÇÃO (O que estava faltando!)
+      // 2. Dispara o e-mail nativo de verificação
       await cred.user?.sendEmailVerification();
 
-      // 3. Salva o perfil com os dados logísticos na coleção 'users' do Firestore
-      await _db.collection('users').doc(cred.user?.uid).set({
+      // 3. Salva na coleção correta 'usuarios' para alinhar com o DashboardController (🔥 CORRIGIDO)
+      await _db.collection('usuarios').doc(cred.user?.uid).set({
         'uid': cred.user?.uid,
         'nome': nome,
         'email': email,
-        'tipo': tipo.toUpperCase(),
+        'tipoUsuario': tipo.toUpperCase(), // 🔥 Padronizado para tipoUsuario
         'empresaId': empresaId,
-        'status': 'PENDENTE', // Fica pendente até ele clicar no link do e-mail
+        'statusAtivacao': 'PENDENTE',
         'dataCadastro': FieldValue.serverTimestamp(),
       });
     } on FirebaseAuthException catch (e) {
@@ -50,9 +50,9 @@ class AuthService {
     }
   }
 
-  // Buscar dados adicionais do usuário logado (para saber o perfil/tipo)
+  // Buscar dados adicionais do usuário logado na coleção correta (🔥 CORRIGIDO)
   Future<DocumentSnapshot> buscarDadosUsuario(String uid) async {
-    return await _db.collection('users').doc(uid).get();
+    return await _db.collection('usuarios').doc(uid).get(); // 🔥 Mudado de 'users' para 'usuarios'
   }
 
   // Logout

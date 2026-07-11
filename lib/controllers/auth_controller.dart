@@ -14,7 +14,7 @@ class AuthController extends ChangeNotifier {
   String? _erroMensagem;
   String? get erroMensagem => _erroMensagem;
 
-  // Propriedade para guardar o ID da empresa do usuário logado na sessão [cite: 2143]
+  // Propriedade para guardar o ID da empresa do usuário logado na sessão
   String? _empresaIdLogada;
   String? get empresaIdLogada => _empresaIdLogada;
 
@@ -36,11 +36,12 @@ class AuthController extends ChangeNotifier {
         if (doc.exists && doc.data() != null) {
           Map<String, dynamic> dados = doc.data() as Map<String, dynamic>;
 
-          // Captura e salva o ID da empresa do usuário que acabou de logar [cite: 2143]
+          // Captura e salva o ID da empresa do usuário que acabou de logar
           _empresaIdLogada = dados['empresaId'];
 
           _setCarregando(false);
-          return dados['tipoUsuario'] ?? dados['tipo']; // Aceita ambas as chaves do seu banco
+          // 🔥 Retorna 'tipoUsuario' padronizado em maiúsculo
+          return dados['tipoUsuario'] ?? dados['tipo'];
         }
       }
       _setCarregando(false);
@@ -52,13 +53,31 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  // Dispara o link oficial do Firebase para redefinição de senha
+  Future<bool> recuperarSenhaPorEmail(String email) async {
+    _setCarregando(true);
+    _erroMensagem = null;
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(
+        email: email.trim().toLowerCase(),
+      );
+      _setCarregando(false);
+      return true;
+    } catch (e) {
+      _erroMensagem = e.toString();
+      _setCarregando(false);
+      return false;
+    }
+  }
+
   // Realiza o cadastro do usuário e injeta o tenant/empresaId de forma automatizada
   Future<bool> registrarUsuario({
     required String nome,
     required String email,
     required String senha,
     required String tipo,
-    String? nomeDaEmpresa, // Campo opcional necessário caso seja um novo Admin
+    String? nomeDaEmpresa,
   }) async {
     _setCarregando(true);
     _erroMensagem = null;
@@ -67,25 +86,22 @@ class AuthController extends ChangeNotifier {
       String empresaIdVinculada;
 
       if (tipo.toUpperCase() == 'ADMINISTRADOR') {
-        // Se for um novo Admin criando conta pública, gera um ID de empresa único [cite: 2145]
+        // Se for um novo Admin criando conta pública, gera um ID de empresa único
         empresaIdVinculada = _db.collection('empresas').doc().id;
 
-        // Salva o registro da nova empresa no Firestore [cite: 2145]
+        // Salva o registro da nova empresa no Firestore
         await _db.collection('empresas').doc(empresaIdVinculada).set({
           'id': empresaIdVinculada,
           'nomeFantasia': nomeDaEmpresa ?? "Nova Empresa Logística",
           'dataCriacao': FieldValue.serverTimestamp(),
         });
       } else {
-        // Se for um motorista ou cliente criado internamente, ele herda o ID do Admin logado [cite: 2146]
         if (_empresaIdLogada == null) {
           throw Exception("Ação não autorizada: Admin não está logado para vincular a empresa.");
         }
         empresaIdVinculada = _empresaIdLogada!;
       }
 
-      // 🔥 CORREÇÃO CRÍTICA AQUI: Apenas aguardamos a execução do void.
-      // Sem atribuir a uma variável 'creds', removendo o erro de compilação!
       await _authService.cadastrarUsuario(
         nome: nome,
         email: email,

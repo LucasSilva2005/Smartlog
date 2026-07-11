@@ -9,6 +9,15 @@ class DashboardController extends ChangeNotifier {
 
   bool get carregando => _carregando;
 
+  // Setter para encapsulamento correto do estado de loading
+  set carregando(bool valor) {
+    _carregando = valor;
+    notifyListeners();
+  }
+
+  // 🏛️ Mapa para armazenar em tempo real as configurações e dados do ERP da Empresa
+  Map<String, dynamic> dadosEmpresa = {};
+
   // Listas locais alimentadas dinamicamente pelo banco de dados
   List<Map<String, dynamic>> _entregas = [];
   List<Map<String, dynamic>> _motoristas = [];
@@ -22,12 +31,15 @@ class DashboardController extends ChangeNotifier {
   int get totalMotoristasAtivos => _motoristas.length;
   int get totalClientesCadastrados => _clientes.length;
 
-  // 🔄 Função chamada assim que o Admin entra na tela para sincronizar os dados
+  // 🔄 Função chamada assim que o Admin entra na tela para sincronizar os dados reais
   Future<void> inicializarDados(String empresaId) async {
     _carregando = true;
     notifyListeners();
 
     try {
+      // 🚀 Inicializa o listener reativo dos dados corporativos do Perfil
+      escutarDadosEmpresa(empresaId);
+
       // Carrega os motoristas vinculados à empresa logada
       final snapshotMotoristas = await _firestore
           .collection('usuarios')
@@ -37,7 +49,7 @@ class DashboardController extends ChangeNotifier {
 
       _motoristas = snapshotMotoristas.docs.map((doc) => doc.data()).toList();
 
-      // Carrega as entregas vinculadas à empresa logada
+      // Carrega as entregas REAIS vinculadas à empresa logada
       final snapshotEntregas = await _firestore
           .collection('entregas')
           .where('empresaId', isEqualTo: empresaId)
@@ -45,16 +57,15 @@ class DashboardController extends ChangeNotifier {
 
       _entregas = snapshotEntregas.docs.map((doc) => doc.data()).toList();
 
-      // Se a lista de entregas do banco estiver vazia, carrega o Mock inicial para testes
-      if (_entregas.isEmpty) {
-        _entregas = [
-          {'id': 'E01', 'cliente': 'Hortifruti Nações', 'regiao': 'Zona Sul', 'status': 'Entregue', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
-          {'id': 'E02', 'cliente': 'Supermercado Vila Sofia', 'regiao': 'Zona Sul', 'status': 'A Caminho', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
-          {'id': 'E03', 'cliente': 'Varejo Interlagos', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
-          {'id': 'E04', 'cliente': 'Lojista Santo Amaro', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
-          {'id': 'E05', 'cliente': 'Mercado Grajaú', 'regiao': 'Zona Sul', 'status': 'Pendente', 'motorista': 'Carlos Silva', 'empresaId': empresaId},
-        ];
-      }
+      // 👥 Carrega os clientes REAIS vinculados à empresa logada
+      final snapshotClientes = await _firestore
+          .collection('usuarios')
+          .where('empresaId', isEqualTo: empresaId)
+          .where('tipoUsuario', isEqualTo: 'CLIENTE')
+          .get();
+
+      _clientes = snapshotClientes.docs.map((doc) => doc.data()).toList();
+
     } catch (e) {
       debugPrint("Erro ao carregar dados do Firestore: $e");
     } finally {
@@ -63,30 +74,67 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  // 📡 Escuta reativa da empresa ativa para atualizar o Perfil do Admin dinamicamente
+  void escutarDadosEmpresa(String empresaId) {
+    _firestore.collection('empresas').doc(empresaId).snapshots().listen((doc) {
+      if (doc.exists) {
+        dadosEmpresa = doc.data() ?? {};
+        notifyListeners();
+      }
+    });
+  }
+
+  // 💾 Salva ou modifica dados cadastrais da empresa no Firestore (Modo Edição)
+  Future<bool> atualizarPerfilEmpresa({
+    required String empresaId,
+    required Map<String, dynamic> novosDados,
+  }) async {
+    try {
+      _carregando = true;
+      notifyListeners();
+
+      await _firestore.collection('empresas').doc(empresaId).set(
+        {
+          ...novosDados,
+          'onlineDesde': dadosEmpresa['onlineDesde'] ?? '2025', // Preserva se já existir
+        },
+        SetOptions(merge: true),
+      );
+
+      _carregando = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint("Erro ao atualizar perfil da empresa: $e");
+      _carregando = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   List<Map<String, dynamic>> filtrarPorRegiao(String regiao) {
     return _entregas.where((e) =>
     e['regiao'].toString().toLowerCase() == regiao.toLowerCase()).toList();
   }
 
-  // ✉️ Criação no Auth com isolamento de App para NÃO deslogar o Admin
+  // ✉️ Criação de Motorista no Auth com senha dinâmica e UID amarrado perfeitamente
   Future<bool> cadastrarMotoristaPorConvite({
     required String nome,
     required String email,
     required String regiao,
+    required String senha,
     required String empresaId,
   }) async {
     _carregando = true;
     notifyListeners();
 
-    // Cria uma instância secundária do Firebase em memória para processar a criação de terceiros
     FirebaseApp? appSecundario;
     bool resultadoSucesso = false;
 
     try {
       final emailTratado = email.trim().toLowerCase();
-      const String senhaTemporaria = "SmartLog@123";
 
-      // Inicializa o app secundário temporário usando as configurações do app atual
+      // 1. Inicializa o ambiente temporário em memória RAM
       appSecundario = await Firebase.initializeApp(
         name: 'CriadorMotoristaTemp',
         options: Firebase.app().options,
@@ -94,30 +142,35 @@ class DashboardController extends ChangeNotifier {
 
       FirebaseAuth authSecundario = FirebaseAuth.instanceFor(app: appSecundario);
 
-      // 1. Cria a credencial usando a instância isolada secundária
+      // 2. Cria a credencial legítima na barreira de segurança (Authentication)
       UserCredential userCredential = await authSecundario.createUserWithEmailAndPassword(
         email: emailTratado,
-        password: senhaTemporaria,
+        password: senha,
       );
 
+      // 🔥 CRÍTICO: Captura o UID real e exato criado pelo Authentication Secundário!
       final String uidGerado = userCredential.user!.uid;
 
-      // 2. Salva os dados complementares no Cloud Firestore com a instância principal
+      // 3. Grava no Firestore na coleção única usando o uidGerado como ID do Documento
       await _firestore.collection('usuarios').doc(uidGerado).set({
         'uid': uidGerado,
         'nome': nome,
         'email': emailTratado,
         'regiaoDesignada': regiao,
-        'tipoUsuario': 'MOTORISTA',
+        'tipoUsuario': 'MOTORISTA', // 👈 Mantido em maiúsculo para bater com o login.dart
         'empresaId': empresaId,
-        'statusAtivacao': 'Aguardando Verificação',
+        'statusAtivacao': 'Ativo', // Já ativa por padrão já que definimos a senha
         'dataCadastro': FieldValue.serverTimestamp(),
       });
 
-      // 3. Dispara o e-mail de verificação oficial do Firebase
-      await userCredential.user!.sendEmailVerification();
+      // 4. Tenta disparar o e-mail (opcional, já que você já sabe a senha)
+      try {
+        await userCredential.user!.sendEmailVerification();
+      } catch (e) {
+        debugPrint("Aviso: E-mail de verificação não pôde ser disparado: $e");
+      }
 
-      // 4. Atualiza a lista da memória reativamente (Sincronizado com as chaves do Firestore)
+      // Sincroniza na memória local para atualizar o painel do Admin na hora
       _motoristas.add({
         'uid': uidGerado,
         'nome': nome,
@@ -125,22 +178,145 @@ class DashboardController extends ChangeNotifier {
         'regiaoDesignada': regiao,
         'tipoUsuario': 'MOTORISTA',
         'empresaId': empresaId,
+        'statusAtivacao': 'Ativo',
+      });
+
+      resultadoSucesso = true;
+    } catch (e) {
+      debugPrint("Erro estrutural no cadastro de motorista: $e");
+      resultadoSucesso = false;
+    } finally {
+      // 5. Destrói a instância secundária para não vazar memória ou deslogar o Admin
+      if (appSecundario != null) {
+        await appSecundario.delete();
+      }
+      _carregando = false;
+      notifyListeners();
+    }
+
+    return resultadoSucesso;
+  }
+
+  // ✉️ Criação de Cliente no Auth com senha dinâmica definida pelo Admin
+  Future<bool> cadastrarClientePorConvite({
+    required String nome,
+    required String email,
+    required String senha, // 👈 Modificado: Recebe a senha vinda do formulário
+    required String empresaId,
+  }) async {
+    _carregando = true;
+    notifyListeners();
+
+    FirebaseApp? appSecundario;
+    bool resultadoSucesso = false;
+
+    try {
+      final emailTratado = email.trim().toLowerCase();
+
+      appSecundario = await Firebase.initializeApp(
+        name: 'CriadorClienteTemp',
+        options: Firebase.app().options,
+      );
+
+      FirebaseAuth authSecundario = FirebaseAuth.instanceFor(app: appSecundario);
+
+      UserCredential userCredential = await authSecundario.createUserWithEmailAndPassword(
+        email: emailTratado,
+        password: senha, // 👈 Usa a senha real digitada pelo Admin
+      );
+
+      final String uidGerado = userCredential.user!.uid;
+
+      await _firestore.collection('usuarios').doc(uidGerado).set({
+        'uid': uidGerado,
+        'nome': nome,
+        'email': emailTratado,
+        'tipoUsuario': 'CLIENTE',
+        'empresaId': empresaId,
+        'statusAtivacao': 'Aguardando Verificação',
+        'dataCadastro': FieldValue.serverTimestamp(),
+      });
+
+      await userCredential.user!.sendEmailVerification();
+
+      _clientes.add({
+        'uid': uidGerado,
+        'nome': nome,
+        'email': emailTratado,
+        'tipoUsuario': 'CLIENTE',
+        'empresaId': empresaId,
         'statusAtivacao': 'Aguardando Verificação',
       });
 
       resultadoSucesso = true;
     } catch (e) {
-      debugPrint("Erro no cadastro e verificação de motorista: $e");
+      debugPrint("Erro no cadastro e convite do cliente: $e");
       resultadoSucesso = false;
     } finally {
-      // Garante a exclusão do app secundário para liberar memória RAM e evitar conflitos posteriores
       if (appSecundario != null) {
         await appSecundario.delete();
       }
       _carregando = false;
-      notifyListeners(); // Modifica o estado global da UI de uma vez só no final do processo
+      notifyListeners();
     }
 
     return resultadoSucesso;
+  }
+
+  // 🗺️ MÓDULO ENTERPRISE CORRIGIDO (Separação estrita de tipos locais vs remotos)
+  Future<bool> criarRotaComEntregas({
+    required List<String> enderecos,
+    required String clienteNome,
+    required String regiao,
+    required Map<String, dynamic> motoristaSelecionado,
+    required String empresaId,
+  }) async {
+    try {
+      _carregando = true;
+      notifyListeners();
+
+      final WriteBatch batch = _firestore.batch();
+      int ordemContador = 1;
+      List<Map<String, dynamic>> novasEntregasLocais = [];
+
+      for (var endereco in enderecos) {
+        if (endereco.trim().isEmpty) continue;
+
+        DocumentReference entregaRef = _firestore.collection('entregas').doc();
+
+        final novaEntregaLocal = {
+          'id': 'ENT-${entregaRef.id.substring(0, 5).toUpperCase()}',
+          'cliente': clienteNome,
+          'endereco': endereco.trim(),
+          'regiao': regiao,
+          'status': 'Pendente',
+          'motorista': motoristaSelecionado['nome'] ?? 'Sem motorista',
+          'motoristaUid': motoristaSelecionado['uid'] ?? '',
+          'ordemEntrega': ordemContador++,
+          'empresaId': empresaId,
+          'dataCriacao': DateTime.now().toIso8601String(),
+        };
+
+        batch.set(entregaRef, {
+          ...novaEntregaLocal,
+          'dataCriacao': FieldValue.serverTimestamp(),
+        });
+
+        novasEntregasLocais.add(novaEntregaLocal);
+      }
+
+      await batch.commit();
+
+      _entregas.addAll(novasEntregasLocais);
+
+      _carregando = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint("Erro ao processar rota e entregas em lote: $e");
+      _carregando = false;
+      notifyListeners();
+      return false;
+    }
   }
 }
