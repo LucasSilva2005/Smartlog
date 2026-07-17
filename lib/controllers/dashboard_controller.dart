@@ -319,4 +319,82 @@ class DashboardController extends ChangeNotifier {
       return false;
     }
   }
+  // 📡 Processamento inteligente do Bip do QR Code (Máquina de Estados)
+  // Retorna um String se precisar abrir modal para o recebedor, ou null se mudou de estado direto
+  Future<String?> registrarBipQRCode({
+    required String entregaId,
+    String? nomeRecebedor,
+  }) async {
+    _carregando = true;
+    notifyListeners();
+
+    try {
+      // 1. Localiza a entrega correspondente na memória local ou Firestore
+      // Como o Admin cria gerando IDs dinâmicos, vamos buscar pelo campo id da entrega
+      final querySnapshot = await _firestore
+          .collection('entregas')
+          .where('id', isEqualTo: entregaId)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isEmpty) {
+        throw Exception("Código de Entrega inválido ou não encontrado.");
+      }
+
+      final docRef = querySnapshot.docs.first.reference;
+      final dadosAtuais = querySnapshot.docs.first.data();
+      final String statusAtual = dadosAtuais['status'] ?? 'Pendente';
+
+      // ➔ BIP 1: Se estiver Pendente, passa automaticamente para "A Caminho"
+      if (statusAtual == 'Pendente') {
+        await docRef.update({
+          'status': 'A Caminho',
+          'dataAtualizacao': FieldValue.serverTimestamp(),
+        });
+
+        // Sincroniza a memória interna imediatamente
+        int idx = _entregas.indexWhere((e) => e['id'] == entregaId);
+        if (idx != -1) _entregas[idx]['status'] = 'A Caminho';
+
+        _carregando = false;
+        notifyListeners();
+        return "EM_TRANSITO";
+      }
+
+      // ➔ BIP 2: Se já estiver "A Caminho" e não enviou o recebedor ainda, pede o nome
+      if (statusAtual == 'A Caminho' && nomeRecebedor == null) {
+        _carregando = false;
+        notifyListeners();
+        return "REQUISITAR_RECEBEDOR"; // Avisa a View para abrir o modal de digitação
+      }
+
+      // ➔ CONFIRMAÇÃO DO BIP 2: Se veio o nome do recebedor, finaliza a baixa do pacote
+      if (statusAtual == 'A Caminho' && nomeRecebedor != null) {
+        await docRef.update({
+          'status': 'Entregue',
+          'recebedor': nomeRecebedor,
+          'dataEntrega': FieldValue.serverTimestamp(),
+        });
+
+        int idx = _entregas.indexWhere((e) => e['id'] == entregaId);
+        if (idx != -1) {
+          _entregas[idx]['status'] = 'Entregue';
+          _entregas[idx]['recebedor'] = nomeRecebedor;
+        }
+
+        _carregando = false;
+        notifyListeners();
+        return "FINALIZADO";
+      }
+
+      _carregando = false;
+      notifyListeners();
+      return "JA_ENTREGUE";
+    } catch (e) {
+      debugPrint("Erro ao processar bip do QR Code: $e");
+      _carregando = false;
+      notifyListeners();
+      return "ERRO";
+    }
+  }
 }

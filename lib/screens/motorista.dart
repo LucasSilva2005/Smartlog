@@ -2,258 +2,386 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:mobile_scanner/mobile_scanner.dart'; // 👈 Importação do Scanner de Câmera
 import '../controllers/dashboard_controller.dart';
 import '../controllers/auth_controller.dart';
+import 'login.dart';
 
 class DashboardMotorista extends StatefulWidget {
-  final String regiaoDesignada; // Adicionado para receber o parâmetro do login
+  final String regiaoDesignada;
 
-  const DashboardMotorista({super.key, this.regiaoDesignada = "Zona Sul"});
+  const DashboardMotorista({super.key, this.regiaoDesignada = "Não Definida"});
 
   @override
   State<DashboardMotorista> createState() => _DashboardMotoristaState();
 }
 
 class _DashboardMotoristaState extends State<DashboardMotorista> {
-  int _indiceAba = 0;
-  String _statusDisponibilidade = "Disponível"; // Disponível, Em rota, Em pausa, Offline
-  bool _rotaIniciada = false;
+  String _abaAtual = "Minha Rota";
+  bool _dadosInicializados = false;
 
   @override
   Widget build(BuildContext context) {
-    final controller = context.watch<DashboardController>();
+    final DashboardController? controller = context.watch<DashboardController?>();
     final authController = context.read<AuthController>();
-    final userUid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
-    // Filtra as entregas reais da memória atribuídas especificamente a este motorista
-    final minhasEntregas = controller.entregas
-        .where((e) => e['motoristaUid'] == userUid)
-        .toList();
+    if (controller == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
-    // Ordena as entregas pela sequência correta da rota gerada pelo Admin
-    minhasEntregas.sort((a, b) => (a['ordemEntrega'] ?? 1).compareTo(b['ordemEntrega'] ?? 1));
+    if (!_dadosInicializados && !controller.carregando) {
+      _dadosInicializados = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        String? empresaId = authController.empresaIdLogada ?? FirebaseAuth.instance.currentUser?.uid;
+        if (empresaId != null) {
+          controller.inicializarDados(empresaId);
+        }
+      });
+    }
+
+    final String motoristaUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    final rotasDoMotorista = controller.entregas.where((e) => e['motoristaUid'] == motoristaUid).toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xffF8FAFC),
+      backgroundColor: const Color(0xffF5F7FA),
       appBar: AppBar(
         backgroundColor: const Color(0xff0F172A),
         foregroundColor: Colors.white,
-        title: const Text("SmartLog - Motorista", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        actions: [
-          // Seletor de Status Operacional rápido no Topo
-          PopupMenuButton<String>(
-            initialValue: _statusDisponibilidade,
-            onSelected: (String novoStatus) {
-              setState(() => _statusDisponibilidade = novoStatus);
-            },
-            child: Container(
-              margin: const EdgeInsets.only(right: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: _obterCorStatus(_statusDisponibilidade).withOpacity(0.2),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _obterCorStatus(_statusDisponibilidade), width: 1.5),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: _obterCorStatus(_statusDisponibilidade)),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _statusDisponibilidade,
-                    style: TextStyle(color: _obterCorStatus(_statusDisponibilidade), fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-                  const Icon(Icons.arrow_drop_down, color: Colors.white, size: 16),
-                ],
+        title: Text("SmartLog - $_abaAtual"),
+      ),
+      drawer: Drawer(
+        child: Column(
+          children: [
+            DrawerHeader(
+              decoration: const BoxDecoration(color: Color(0xff0F172A)),
+              child: SizedBox(
+                width: double.infinity,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.delivery_dining, size: 48, color: Colors.orange),
+                    const SizedBox(height: 12),
+                    const Text("SmartLog Driver", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                    Text(FirebaseAuth.instance.currentUser?.email ?? "motorista@smartlog.com", style: const TextStyle(color: Colors.white70, fontSize: 12))
+                  ],
+                ),
               ),
             ),
-            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-              const PopupMenuItem<String>(value: 'Disponível', child: Text('🟢 Disponível')),
-              const PopupMenuItem<String>(value: 'Em rota', child: Text('🚚 Em rota')),
-              const PopupMenuItem<String>(value: 'Em pausa', child: Text('⏸️ Em pausa')),
-              const PopupMenuItem<String>(value: 'Offline', child: Text('🔴 Offline')),
-            ],
-          ),
-        ],
+            _itemMenu(Icons.alt_route, "Minha Rota"),
+            _itemMenu(Icons.history, "Histórico de Viagens"),
+            _itemMenu(Icons.person, "Meu Perfil"),
+            const Spacer(),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.redAccent),
+              title: const Text("Deslogar", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+              onTap: () async {
+                await authController.realizarLogout();
+                if (mounted) {
+                  Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const TelaLogin()));
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
       ),
-      body: _renderizarAba(minhasEntregas, controller),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _indiceAba,
-        selectedItemColor: Colors.orange,
-        unselectedItemColor: Colors.grey,
-        backgroundColor: Colors.white,
-        type: BottomNavigationBarType.fixed,
-        onTap: (index) => setState(() => _indiceAba = index),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.local_shipping), label: 'Rota Atual'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Perfil & Carro'),
-          BottomNavigationBarItem(icon: Icon(Icons.security), label: 'Segurança'),
-        ],
+      // 🔥 GATILHO COMPERCIAL: Botão de Câmera flutuante rápido para o motorista bipar encomendas na rua
+      floatingActionButton: _abaAtual == "Minha Rota"
+          ? FloatingActionButton.extended(
+        backgroundColor: const Color(0xff0F172A),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.qr_code_scanner, color: Colors.orange),
+        label: const Text("Bipar Caixa", style: TextStyle(fontWeight: FontWeight.bold)),
+        onPressed: () => _abrirCameraScanner(context, controller),
+      )
+          : null,
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        child: _renderizarConteudo(_abaAtual, rotasDoMotorista, controller),
       ),
     );
   }
 
-  Widget _renderizarAba(List<Map<String, dynamic>> minhasEntregas, DashboardController controller) {
-    switch (_indiceAba) {
-      case 0:
-        return _buildAbaRotaAtual(minhasEntregas, controller);
-      case 1:
-        return _buildAbaPerfilEVeiculo(minhasEntregas);
-      case 2:
-        return _buildAbaSegurancaEHistorico();
+  Widget _itemMenu(IconData icon, String titulo) {
+    bool selecionado = _abaAtual == titulo;
+    return ListTile(
+      leading: Icon(icon, color: selecionado ? Colors.orange : Colors.grey),
+      title: Text(titulo, style: TextStyle(fontWeight: selecionado ? FontWeight.bold : FontWeight.normal)),
+      selected: selecionado,
+      onTap: () {
+        setState(() => _abaAtual = titulo);
+        Navigator.pop(context);
+      },
+    );
+  }
+
+  Widget _renderizarConteudo(String aba, List<Map<String, dynamic>> rotas, DashboardController controller) {
+    switch (aba) {
+      case "Minha Rota":
+        return _buildMinhaRotaView(rotas, controller);
+      case "Histórico de Viagens":
+        return _buildHistoricoView(rotas);
+      case "Meu Perfil":
+        return _buildPerfilMotoristaView(controller);
       default:
-        return _buildAbaRotaAtual(minhasEntregas, controller);
+        return _buildMinhaRotaView(rotas, controller);
     }
   }
 
-  // ==========================================
-  // 🚚 ABA 1: ROTA ATUAL & OPERAÇÃO DE CAMPO
-  // ==========================================
-  Widget _buildAbaRotaAtual(List<Map<String, dynamic>> entregas, DashboardController controller) {
-    final pendentes = entregas.where((e) => e['status'] == 'Pendente' || e['status'] == 'A Caminho').toList();
-    final proximaEntrega = pendentes.isNotEmpty ? pendentes.first : null;
+  // 1. VISÃO DAS PARADAS ATIVAS
+  Widget _buildMinhaRotaView(List<Map<String, dynamic>> rotas, DashboardController controller) {
+    final paradasAtivas = rotas.where((e) => e['status'] != 'Entregue').toList();
+    paradasAtivas.sort((a, b) => (a['ordemEntrega'] ?? 0).compareTo(b['ordemEntrega'] ?? 0));
 
-    return Column(
-      children: [
-        // 🎫 BANNER PRÓXIMA ENTREGA / PRÓXIMO ALVO DO MAPA
-        if (proximaEntrega != null)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: const Color(0xff0F172A),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text("PRÓXIMA PARADA OPERACIONAL", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1)),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(4)),
-                      child: Text("Ordem #${proximaEntrega['ordemEntrega'] ?? '1'}", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                    )
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(proximaEntrega['endereco'] ?? 'Sem endereço', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text("Cliente: ${proximaEntrega['cliente'] ?? 'Geral'}", style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                const SizedBox(height: 16),
-
-                // Botões de Ação Industrial Grandes
-                Row(
-                  children: [
-                    if (!_rotaIniciada)
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.all(14)),
-                          onPressed: () {
-                            setState(() {
-                              _rotaIniciada = true;
-                              _statusDisponibilidade = "Em rota";
-                              proximaEntrega['status'] = 'A Caminho';
-                            });
-                          },
-                          icon: const Icon(Icons.play_arrow),
-                          label: const Text("Iniciar Rota", style: TextStyle(fontWeight: FontWeight.bold)),
-                        ),
-                      )
-                    else
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white, padding: const EdgeInsets.all(14)),
-                          onPressed: () async {
-                            // Lógica reativa para dar baixa e atualizar status no banco
-                            _modalConfirmarEntregaFinal(proximaEntrega);
-                          },
-                          icon: const Icon(Icons.check_circle),
-                          label: const Text("Concluir Entrega", style: TextStyle(fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                  ],
-                )
-              ],
-            ),
-          ),
-
-        // 📋 LISTA COMPLETA DAS ENTREGAS RESTANTES DA ROTA DO MOTORISTA
-        Expanded(
-          child: entregas.isEmpty
-              ? const Center(child: Text("Nenhuma entrega atribuída para você hoje."))
-              : ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: entregas.length,
-            itemBuilder: (context, index) {
-              final e = entregas[index];
-              bool isAtual = e['id'] == proximaEntrega?['id'];
-
-              return Card(
-                color: isAtual ? Colors.orange.withOpacity(0.05) : Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  side: isAtual ? const BorderSide(color: Colors.orange, width: 1) : BorderSide.none,
-                ),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: _obterCorBadgeStatus(e['status']),
-                    child: Text("${e['ordemEntrega'] ?? index + 1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  ),
-                  title: Text(e['endereco'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  subtitle: Text("Cliente: ${e['cliente']} • Código: ${e['id']}"),
-                  trailing: Icon(
-                    e['status'] == 'Entregue' ? Icons.check_circle : Icons.radio_button_unchecked,
-                    color: e['status'] == 'Entregue' ? Colors.green : Colors.grey,
-                  ),
-                ),
-              );
-            },
-          ),
-        )
-      ],
-    );
-  }
-
-  // ==========================================
-  // 👤 ABA 2: DADOS PESSOAIS & FICHA DO VEÍCULO
-  // ==========================================
-  Widget _buildAbaPerfilEVeiculo(List<Map<String, dynamic>> entregas) {
-    final userEmail = FirebaseAuth.instance.currentUser?.email ?? "joao.silva@smartlog.com";
-    final concluidas = entregas.where((e) => e['status'] == 'Entregue').length;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+    return Padding(
+      key: const ValueKey("MinhaRotaView"),
+      padding: const EdgeInsets.all(16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. HEADER DO PERFIL DO MOTORISTA
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Paradas Sequenciadas", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: Colors.orange.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                child: Text("${paradasAtivas.length} pendentes", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12)),
+              )
+            ],
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: paradasAtivas.isEmpty
+                ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_circle_outline, size: 56, color: Colors.green),
+                  SizedBox(height: 12),
+                  Text("Parabéns! Nenhuma entrega pendente.", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            )
+                : ListView.builder(
+              itemCount: paradasAtivas.length,
+              itemBuilder: (context, index) {
+                final parada = paradasAtivas[index];
+                final status = parada['status'] ?? 'Pendente';
+
+                return Card(
+                  color: Colors.white,
+                  elevation: 1,
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: status == 'A Caminho' ? Colors.blue.withOpacity(0.15) : Colors.orange.withOpacity(0.15),
+                      child: Text("${parada['ordemEntrega'] ?? (index + 1)}", style: TextStyle(color: status == 'A Caminho' ? Colors.blue : Colors.orange, fontWeight: FontWeight.bold)),
+                    ),
+                    title: Text(parada['endereco'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 4.0),
+                      child: Text("Cliente: ${parada['cliente']}\nStatus: $status"),
+                    ),
+                    trailing: const Icon(Icons.qr_code, color: Colors.grey, size: 20),
+                  ),
+                );
+              },
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  // 📷 MODAL INJETOR DO SCANNER DE CÂMERA EM TEMPO REAL
+  void _abrirCameraScanner(BuildContext context, DashboardController controller) {
+    bool processandoBip = false; // Flag anti-bipagem dupla sequencial
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.black,
+      builder: (context) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: const Text("Aponte para o QR Code da Caixa", style: TextStyle(fontSize: 14)),
+          leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+        ),
+        body: SafeArea(
+          child: MobileScanner(
+            onDetect: (capture) async {
+              if (processandoBip) return;
+
+              final List<Barcode> barcodes = capture.barcodes;
+
+              if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
+                processandoBip = true;
+
+                // 🔗 CAPTURA O LINK COMPLETO (Ex: https://smartlog.com/ENT-A8F31)
+                final String linkCompleto = barcodes.first.rawValue!;
+
+                // ✂️ TRUQUE MÁGICO: Corta o link para pegar só o ID que está depois da última barra "/"
+                String entregaIdDecodificado = linkCompleto;
+                if (linkCompleto.contains('/')) {
+                  entregaIdDecodificado = linkCompleto.split('/').last.trim();
+                }
+
+                Navigator.pop(context); // Fecha o leitor da câmera imediatamente
+
+                // Dispara a triagem da máquina de estados do controller usando só o ID cortado!
+                String? resposta = await controller.registrarBipQRCode(entregaId: entregaIdDecodificado);
+
+                if (!mounted) return;
+
+                if (resposta == "EM_TRANSITO") {
+                  _mostrarSnackBar(context, "Pacote $entregaIdDecodificado bipado! Status alterado para: Em trânsito 🚚", Colors.blue);
+                } else if (resposta == "REQUISITAR_RECEBEDOR") {
+                  _modalColetaRecebedor(context, controller, entregaIdDecodificado);
+                } else if (resposta == "JA_ENTREGUE") {
+                  _mostrarSnackBar(context, "Atenção: Este pacote já foi entregue anteriormente.", Colors.orange);
+                } else {
+                  _mostrarSnackBar(context, "Código inválido ou não pertencente a esta empresa.", Colors.red);
+                }
+              }
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 📝 MODAL AUTOMÁTICO DE COLETA DE RECEBEDOR (CHAMADO NO BIP 2)
+  void _modalColetaRecebedor(BuildContext context, DashboardController controller, String entregaId) {
+    final recebedorCtrl = TextEditingController();
+    final _popupKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.assignment_ind_outlined, color: Colors.green),
+            const SizedBox(width: 8),
+            Text("Protocolo $entregaId", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Form(
+          key: _popupKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Destinatário localizado! Informe o nome de quem está recebendo o pacote corporativo:", style: TextStyle(fontSize: 13, color: Colors.grey)),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: recebedorCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: "Nome Completo do Recebedor", border: OutlineInputBorder()),
+                validator: (v) => (v == null || v.trim().isEmpty) ? "Obrigatório identificar o recebedor" : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff0F172A), foregroundColor: Colors.white),
+            onPressed: () async {
+              if (_popupKey.currentState!.validate()) {
+                Navigator.pop(context); // Fecha o popup
+
+                // Envia a confirmação final com o nome anexado
+                String? fim = await controller.registrarBipQRCode(
+                  entregaId: entregaId,
+                  nomeRecebedor: recebedorCtrl.text.trim(),
+                );
+
+                if (fim == "FINALIZADO" && context.mounted) {
+                  _mostrarSnackBar(context, "Entrega $entregaId confirmada com sucesso! Protocolo fechado.", Colors.green);
+                }
+              }
+            },
+            child: const Text("Confirmar Entrega"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _mostrarSnackBar(BuildContext context, String txt, Color cor) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(txt), backgroundColor: cor));
+  }
+
+  // 2. ABA HISTÓRICO
+  Widget _buildHistoricoView(List<Map<String, dynamic>> rotas) {
+    final concluidas = rotas.where((e) => e['status'] == 'Entregue').toList();
+    return Padding(
+      key: const ValueKey("HistoricoView"),
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("Minhas Entregas Realizadas", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
+          const SizedBox(height: 16),
+          Expanded(
+            child: concluidas.isEmpty
+                ? const Center(child: Text("Nenhuma entrega finalizada no histórico recente.", style: TextStyle(color: Colors.grey)))
+                : ListView.builder(
+              itemCount: concluidas.length,
+              itemBuilder: (context, index) {
+                final item = concluidas[index];
+                return Card(
+                  color: Colors.white,
+                  child: ListTile(
+                    leading: const CircleAvatar(backgroundColor: Colors.green, child: Icon(Icons.check, color: Colors.white)),
+                    title: Text(item['endereco'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text("Cliente: ${item['cliente']}\nRecebedor: ${item['recebedor'] ?? 'Não informado'}"),
+                    trailing: const Text("Concluído", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
+                );
+              },
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  // 3. ABA PERFIL
+  Widget _buildPerfilMotoristaView(DashboardController controller) {
+    final userEmail = FirebaseAuth.instance.currentUser?.email ?? "";
+    return SingleChildScrollView(
+      key: const ValueKey("PerfilMotoristaView"),
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Card(
             color: const Color(0xff0F172A),
+            elevation: 2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16.0),
               child: Row(
                 children: [
-                  const CircleAvatar(radius: 32, backgroundColor: Colors.orange, child: Icon(Icons.delivery_dining, size: 36, color: Colors.white)),
+                  const CircleAvatar(radius: 32, backgroundColor: Colors.orange, child: Icon(Icons.person, size: 36, color: Colors.white)),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text("João Silva", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                        const Text("Motorista Parceiro", style: TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.w500)),
-                        Text(userEmail, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        const Text("Motorista Parceiro", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                         const SizedBox(height: 4),
-                        const Row(
-                          children: [
-                            Icon(Icons.star, color: Colors.amber, size: 16),
-                            SizedBox(width: 4),
-                            Text("4.9 (42 avaliações)", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                          ],
-                        )
+                        Text("Setor Designado: ${widget.regiaoDesignada}", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 4),
+                        Text(userEmail, style: const TextStyle(color: Colors.white70, fontSize: 13)),
                       ],
                     ),
                   )
@@ -261,122 +389,19 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-
-          // 2. DETALHAMENTO DE KPI LOGÍSTICOS
-          const Text("Estatísticas de Performance", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: _miniCardKpiMotorista("Total Rotas", "${entregas.length}", Colors.blue)),
-              const SizedBox(width: 8),
-              Expanded(child: _miniCardKpiMotorista("Concluídas", "$concluidas", Colors.green)),
-              const SizedBox(width: 8),
-              Expanded(child: _miniCardKpiMotorista("KM Rodados", "1.420 km", Colors.purple)),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // 3. FICHA CADASTRAL DO VEÍCULO DA COOP
-          const Text("Informações do Veículo Atribuído", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
-          const SizedBox(height: 8),
+          const SizedBox(height: 24),
+          const Text("Configurações e Vínculos ERP", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
+          const SizedBox(height: 12),
           Card(
+            elevation: 1,
             color: Colors.white,
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16.0),
               child: Column(
                 children: [
-                  _perfilInfoRow("Modelo/Marca", "Fiorino Endurance - Fiat"),
-                  _perfilInfoRow("Ano / Cor", "2023 • Branca"),
-                  _perfilInfoRow("Placa Mercosul", "LOG-3M26"),
-                  _perfilInfoRow("Capacidade Operacional", "650 kg / 3.3 m³"),
-                  _perfilInfoRow("Km Atual do Painel", "24.510 km"),
-                  const Divider(height: 24),
-                  _perfilInfoRow("Última Manutenção preventiva", "15/12/2025"),
-                  _perfilInfoRow("Próxima Manutenção / Troca Óleo", "25.000 km"),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // 4. CARTEIRA DE DOCUMENTOS DIGITAIS
-          const Text("Documentos e Certificados Regulamentares", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
-          const SizedBox(height: 8),
-          Card(
-            color: Colors.white,
-            child: Column(
-              children: [
-                _documentoFichaRow("CNH Digital - Categoria B", "Válida até 12/2028", true),
-                _documentoFichaRow("CRLV - Documento do Veículo", "Exercício 2026 Pago", true),
-                _documentoFichaRow("Apólice do Seguro de Carga", "Ativa Leroy Merlin", true),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ==========================================
-  // 🛡️ ABA 3: SEGURANÇA (SOS) & HISTÓRICO EVENTOS
-  // ==========================================
-  Widget _buildAbaSegurancaEHistorico() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 🚨 BOTÃO DE SOS PANIC EMERGENCY
-          Card(
-            color: Colors.red[50],
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.red.shade200)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.gpp_maybe, color: Colors.red, size: 24),
-                      SizedBox(width: 8),
-                      Text("Central de Segurança & SOS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text("Em caso de quebra mecânica, sinistro ou sinistro operacional, acione o botão abaixo para alertar o Admin em tempo real.", style: TextStyle(fontSize: 12, color: Colors.black87)),
-                  const SizedBox(height: 16),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, elevation: 4),
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("🚨 ALERTA SOS ENVIADO! A central e o Admin foram notificados via push."), backgroundColor: Colors.red, duration: Duration(seconds: 4)),
-                        );
-                      },
-                      icon: const Icon(Icons.warning_amber, size: 24),
-                      label: const Text("DISPARAR ALERTA SOS DE EMERGÊNCIA", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          const Text("Contatos Rápidos de Suporte", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
-          const SizedBox(height: 8),
-          const Card(
-            color: Colors.white,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  ListTile(leading: Icon(Icons.headset_mic, color: Colors.blue), title: Text("Guincho & Seguradora 24h"), subtitle: Text("0800-777-1234")),
-                  Divider(height: 1),
-                  ListTile(leading: Icon(Icons.supervisor_account, color: Colors.blue), title: Text("Gerente Operacional (Admin)"), subtitle: Text("(11) 99999-8888")),
+                  _infoFichaRow("Veículo de Operação", "Fiorino Furgão (Padrão Leroy Merlin)"),
+                  _infoFichaRow("Status de Ativação", "Ativo na Frota"),
+                  _infoFichaRow("Segurança Multi-Tenant", "Isolamento Ativo por ID da Empresa"),
                 ],
               ),
             ),
@@ -386,102 +411,14 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
     );
   }
 
-  // ==========================================
-  // WIDGETS AUXILIARES E INTERATIVOS
-  // ==========================================
-  Color _obterCorStatus(String s) {
-    if (s == "Disponível") return Colors.green;
-    if (s == "Em rota") return Colors.orange;
-    if (s == "Em pausa") return Colors.blue;
-    return Colors.grey;
-  }
-
-  Color _obterCorBadgeStatus(dynamic status) {
-    if (status == 'Entregue') return Colors.green;
-    if (status == 'A Caminho') return Colors.orange;
-    return Colors.blueGrey;
-  }
-
-  Widget _perfilInfoRow(String label, String value) {
+  Widget _infoFichaRow(String label, String valor) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-        ],
-      ),
-    );
-  }
-
-  Widget _miniCardKpiMotorista(String label, String val, Color cor) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border(left: BorderSide(color: cor, width: 4))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 4),
-          Text(val, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Widget _documentoFichaRow(String t, String sub, bool ok) {
-    return ListTile(
-      leading: Icon(Icons.file_present, color: ok ? Colors.green : Colors.grey),
-      title: Text(t, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-      subtitle: Text(sub, style: const TextStyle(fontSize: 11)),
-      trailing: const Text("Visualizar", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12)),
-    );
-  }
-
-  // MODAL CONFIRMADOR DE BAIXAS DE ENTREGA NO FIRESTORE
-  void _modalConfirmarEntregaFinal(Map<String, dynamic> entrega) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Confirmar Entrega"),
-        content: Text("Deseja dar baixa definitiva na entrega de código ${entrega['id']}?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            onPressed: () async {
-              // 🔄 Baixa atômica real no documento do Firestore
-              final String idDoc = entrega['id'].toString().replaceAll("ENT-", "");
-
-              // Localiza o ID real gerado por doc() procurando no banco ou por correspondência
-              final query = await FirebaseFirestore.instance
-                  .collection('entregas')
-                  .where('id', isEqualTo: entrega['id'])
-                  .get();
-
-              if (query.docs.isNotEmpty) {
-                await query.docs.first.reference.update({
-                  'status': 'Entregue',
-                  'dataFim': FieldValue.serverTimestamp(),
-                });
-              }
-
-              // Sincroniza localmente
-              setState(() {
-                entrega['status'] = 'Entregue';
-                _rotaIniciada = false; // Permite iniciar a próxima parada
-              });
-
-              if (mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Sucesso! Baixa de entrega realizada."), backgroundColor: Colors.green),
-                );
-              }
-            },
-            child: const Text("Confirmar Baixa", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
+          Flexible(child: Text(valor, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13), textAlign: TextAlign.end)),
         ],
       ),
     );
