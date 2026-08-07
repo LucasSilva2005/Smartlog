@@ -18,6 +18,10 @@ class AuthController extends ChangeNotifier {
   String? _empresaIdLogada;
   String? get empresaIdLogada => _empresaIdLogada;
 
+  // Nome cadastral do usuário logado (usado pelo painel do Cliente para localizar suas entregas)
+  String? _nomeUsuarioLogado;
+  String? get nomeUsuarioLogado => _nomeUsuarioLogado;
+
   void _setCarregando(bool valor) {
     _carregando = valor;
     notifyListeners();
@@ -38,6 +42,9 @@ class AuthController extends ChangeNotifier {
 
           // Captura e salva o ID da empresa do usuário que acabou de logar
           _empresaIdLogada = dados['empresaId'];
+
+          // Aproveita a MESMA leitura do documento para guardar o nome, sem nova consulta
+          _nomeUsuarioLogado = dados['nome'];
 
           _setCarregando(false);
           // 🔥 Retorna 'tipoUsuario' padronizado em maiúsculo
@@ -123,6 +130,7 @@ class AuthController extends ChangeNotifier {
   Future<void> realizarLogout() async {
     await _authService.deslogar();
     _empresaIdLogada = null;
+    _nomeUsuarioLogado = null;
     notifyListeners();
   }
 }

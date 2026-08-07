@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobile_scanner/mobile_scanner.dart'; // 👈 Importação do Scanner de Câmera
 import '../controllers/dashboard_controller.dart';
 import '../controllers/auth_controller.dart';
+import 'chat_assistente.dart';
 import 'login.dart';
 
 class DashboardMotorista extends StatefulWidget {
@@ -72,6 +73,20 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
             _itemMenu(Icons.alt_route, "Minha Rota"),
             _itemMenu(Icons.history, "Histórico de Viagens"),
             _itemMenu(Icons.person, "Meu Perfil"),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.support_agent, color: Colors.orange),
+              title: const Text("Assistente IA", style: TextStyle(fontWeight: FontWeight.w500)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ChatAssistenteScreen(
+                    perfil: "MOTORISTA",
+                    uid: FirebaseAuth.instance.currentUser?.uid ?? "",
+                  ),
+                ));
+              },
+            ),
             const Spacer(),
             const Divider(),
             ListTile(
@@ -148,7 +163,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
               const Text("Paradas Sequenciadas", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: Colors.orange.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
                 child: Text("${paradasAtivas.length} pendentes", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12)),
               )
             ],
@@ -179,7 +194,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   child: ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: status == 'A Caminho' ? Colors.blue.withOpacity(0.15) : Colors.orange.withOpacity(0.15),
+                      backgroundColor: status == 'A Caminho' ? Colors.blue.withValues(alpha: 0.15) : Colors.orange.withValues(alpha: 0.15),
                       child: Text("${parada['ordemEntrega'] ?? (index + 1)}", style: TextStyle(color: status == 'A Caminho' ? Colors.blue : Colors.orange, fontWeight: FontWeight.bold)),
                     ),
                     title: Text(parada['endereco'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -260,7 +275,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
   // 📝 MODAL AUTOMÁTICO DE COLETA DE RECEBEDOR (CHAMADO NO BIP 2)
   void _modalColetaRecebedor(BuildContext context, DashboardController controller, String entregaId) {
     final recebedorCtrl = TextEditingController();
-    final _popupKey = GlobalKey<FormState>();
+    final popupKey = GlobalKey<FormState>();
 
     showDialog(
       context: context,
@@ -274,7 +289,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
           ],
         ),
         content: Form(
-          key: _popupKey,
+          key: popupKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -294,7 +309,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff0F172A), foregroundColor: Colors.white),
             onPressed: () async {
-              if (_popupKey.currentState!.validate()) {
+              if (popupKey.currentState!.validate()) {
                 Navigator.pop(context); // Fecha o popup
 
                 // Envia a confirmação final com o nome anexado

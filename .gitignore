@@ -33,6 +33,14 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Segredos — NUNCA versionar chaves de API
+.env
+.env.*
+!.env.example
+
+# Cloud Functions
+functions/node_modules/
+
 # Symbolication related
 app.*.symbols
 

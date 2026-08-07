@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'chat_assistente.dart';
 import '../controllers/dashboard_controller.dart';
 import '../controllers/auth_controller.dart';
 
@@ -14,7 +16,7 @@ class DashboardAdmin extends StatefulWidget {
 
 class _DashboardAdminState extends State<DashboardAdmin> {
   String _abaAtual = "Dashboard";
-  String _zonaSelecionada = "TODAS";
+  String _zonaSelecionada = "Todas";
   final _formKey = GlobalKey<FormState>();
   final _rotaFormKey = GlobalKey<FormState>();
 
@@ -113,6 +115,20 @@ class _DashboardAdminState extends State<DashboardAdmin> {
             _itemMenu(Icons.people, "Clientes"),
             _itemMenu(Icons.map, "Rotas"),
             _itemMenu(Icons.person, "Perfil"),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.support_agent, color: Colors.orange),
+              title: const Text("Assistente IA", style: TextStyle(fontWeight: FontWeight.w500)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ChatAssistenteScreen(
+                    perfil: "ADMINISTRADOR",
+                    uid: FirebaseAuth.instance.currentUser?.uid ?? "",
+                  ),
+                ));
+              },
+            ),
           ],
         ),
       ),
@@ -145,7 +161,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
       case "Dashboard":
         return _buildDashboardPrincipal(controller);
       case "Entregas":
-        return _buildAbaEntregas(controller);
+        return _buildAbaEntregas(controller, authController);
       case "Motoristas":
         return _buildAbaMotoristas(controller);
       case "Clientes":
@@ -213,6 +229,9 @@ class _DashboardAdminState extends State<DashboardAdmin> {
           ),
 
           const SizedBox(height: 24),
+          _buildSecaoAiInsights(controller),
+
+          const SizedBox(height: 24),
 
           const Text(
               "Distribuição por Regiões",
@@ -256,6 +275,123 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                 _logRow("Carga operacional registrada e integrada.", "Há 5 min"),
                 _logRow("Admin realizou login corporativo.", "Há 12 min"),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 🧠 AI LOGISTICS INSIGHTS — leitura automática da operação a partir das entregas já carregadas
+  Widget _buildSecaoAiInsights(DashboardController controller) {
+    final Map<String, dynamic> insights = controller.gerarInsightsOperacionais();
+
+    final bool temDados = insights['temDados'] == true;
+    final Map<String, int> porStatus = (insights['porStatus'] as Map<String, int>);
+    final List<String> recomendacoes = (insights['recomendacoes'] as List<String>);
+    final String? regiaoLider = insights['regiaoLider'] as String?;
+    final String? motoristaTopo = insights['motoristaSobrecarregado'] as String?;
+    final int atrasadas = insights['atrasadas'] as int;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.auto_awesome, size: 18, color: Colors.orange),
+            const SizedBox(width: 8),
+            const Text(
+              "AI Logistics Insights",
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xff0F172A)),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                "Automático",
+                style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 10),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!temDados)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    "Ainda não há entregas registradas para analisar.",
+                    style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 13),
+                  ),
+                )
+              else ...[
+                // Indicadores — reutiliza o mesmo layout label/valor já usado na aba Perfil
+                _perfilInfoRow("Região de maior volume",
+                    regiaoLider == null ? "Sem região informada" : "$regiaoLider (${insights['regiaoLiderPercentual']}%)"),
+                _perfilInfoRow("Maior carga ativa",
+                    motoristaTopo == null ? "Nenhum motorista em rota" : "$motoristaTopo (${insights['motoristaCargaAtiva']} entregas)"),
+                _perfilInfoRow("Entregas concluídas", "${insights['percentualConcluidas']}%"),
+                _perfilInfoRow("Em atraso (> ${DashboardController.horasLimiteAtraso}h)",
+                    atrasadas == 0 ? "Nenhuma" : "$atrasadas entrega(s)"),
+                _perfilInfoRow("Sem motorista atribuído",
+                    insights['semMotorista'] == 0 ? "Nenhuma" : "${insights['semMotorista']} entrega(s)"),
+
+                const Divider(height: 24),
+                const Text(
+                  "Distribuição por Status",
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xff334155)),
+                ),
+                const SizedBox(height: 8),
+                // Reutiliza o _zonaRow (bolinha colorida + rótulo + detalhe) já usado nas regiões
+                ...porStatus.entries.map((item) => _zonaRow(
+                  item.key,
+                  "${item.value} entrega(s)",
+                  _corDoStatus(item.key),
+                )),
+              ],
+
+              const Divider(height: 24),
+              const Text(
+                "Recomendações Operacionais",
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xff334155)),
+              ),
+              const SizedBox(height: 8),
+              ...recomendacoes.map(_linhaRecomendacao),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _linhaRecomendacao(String texto) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(Icons.chevron_right, size: 16, color: Colors.orange),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              texto,
+              style: const TextStyle(fontSize: 12, color: Color(0xff334155), height: 1.4),
             ),
           ),
         ],
@@ -315,17 +451,60 @@ class _DashboardAdminState extends State<DashboardAdmin> {
     );
   }
 
-  // 2. ABA ENTREGAS
-  Widget _buildAbaEntregas(DashboardController controller) {
+  // 2. ABA ENTREGAS (LISTAGEM OPERACIONAL REAL + FILTRO POR REGIÃO)
+  Widget _buildAbaEntregas(DashboardController controller, AuthController authController) {
+    // 🔥 Zonas alinhadas exatamente com os valores gravados no Firestore pelo criarRotaComEntregas
+    const List<String> zonasDisponiveis = ["Todas", "Zona Norte", "Zona Sul", "Zona Leste", "Zona Oeste"];
+
+    // Cópia defensiva: ordenar direto em controller.entregas mutaria o estado global do painel
+    final List<Map<String, dynamic>> listaFiltrada = _zonaSelecionada == "Todas"
+        ? List<Map<String, dynamic>>.from(controller.entregas)
+        : controller.filtrarPorRegiao(_zonaSelecionada);
+
+    // Prioriza o que ainda exige ação do administrador e mantém a sequência da rota dentro de cada grupo
+    const Map<String, int> prioridadeStatus = {
+      'Atrasada': 0,
+      'Pendente': 1,
+      'A Caminho': 2,
+      'Entregue': 3,
+    };
+
+    listaFiltrada.sort((a, b) {
+      final int pa = prioridadeStatus[a['status']] ?? 4;
+      final int pb = prioridadeStatus[b['status']] ?? 4;
+      if (pa != pb) return pa.compareTo(pb);
+      return ((a['ordemEntrega'] ?? 0) as num).compareTo((b['ordemEntrega'] ?? 0) as num);
+    });
+
     return Padding(
       key: const ValueKey("EntregasView"),
       padding: const EdgeInsets.all(16),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Entregas", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff0F172A))),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  listaFiltrada.length == 1 ? "1 entrega" : "${listaFiltrada.length} entregas",
+                  style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              )
+            ],
+          ),
+          const SizedBox(height: 12),
+
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: ["TODAS", "NORTE", "SUL", "LESTE", "OESTE"].map((zona) {
+              children: zonasDisponiveis.map((zona) {
                 bool ativo = _zonaSelecionada == zona;
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -340,12 +519,263 @@ class _DashboardAdminState extends State<DashboardAdmin> {
             ),
           ),
           const SizedBox(height: 16),
-          const Expanded(
-            child: Center(child: Text("Nenhuma entrega sincronizada nesta região.")),
+
+          Expanded(
+            child: (controller.carregando && controller.entregas.isEmpty)
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+              color: Colors.orange,
+              onRefresh: () async {
+                final String? empresaId = authController.empresaIdLogada ?? FirebaseAuth.instance.currentUser?.uid;
+                if (empresaId != null) {
+                  await controller.inicializarDados(empresaId);
+                }
+              },
+              // physics sempre rolável para o "puxar para atualizar" funcionar mesmo com a lista vazia
+              child: listaFiltrada.isEmpty
+                  ? ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  SizedBox(
+                    height: 240,
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            controller.entregas.isEmpty ? Icons.inventory_2_outlined : Icons.filter_alt_off_outlined,
+                            size: 48,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            controller.entregas.isEmpty
+                                ? "Nenhuma entrega cadastrada."
+                                : "Nenhuma entrega na $_zonaSelecionada.",
+                            style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
+                          ),
+                          if (controller.entregas.isEmpty)
+                            const Text(
+                              "Crie uma rota na aba Rotas para gerar entregas.",
+                              style: TextStyle(color: Colors.grey, fontSize: 12),
+                              textAlign: TextAlign.center,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              )
+                  : ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                itemCount: listaFiltrada.length,
+                itemBuilder: (context, index) => _cardEntrega(listaFiltrada[index]),
+              ),
+            ),
           ),
         ],
       ),
     );
+  }
+
+  // 📦 Ficha completa da entrega: ID, status, endereço, cliente, motorista, região e ordem na rota
+  Widget _cardEntrega(Map<String, dynamic> entrega) {
+    final String status = (entrega['status'] ?? 'Pendente').toString();
+    final Color corStatus = _corDoStatus(status);
+    // Código real gravado no Firestore — é exatamente o valor que o scanner do motorista procura
+    final String codigoEntrega = (entrega['id'] ?? '').toString().trim();
+
+    return Card(
+      color: Colors.white,
+      elevation: 1,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Text(
+                    codigoEntrega.isEmpty ? 'Sem código' : codigoEntrega,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xff0F172A), letterSpacing: 0.5),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: corStatus.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(color: corStatus, fontWeight: FontWeight.bold, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              entrega['endereco'] ?? 'Endereço não informado',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xff334155)),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 8),
+            _linhaInfoEntrega(Icons.business_outlined, "Cliente: ${entrega['cliente'] ?? 'Não informado'}"),
+            const SizedBox(height: 4),
+            _linhaInfoEntrega(Icons.delivery_dining, "Motorista: ${entrega['motorista'] ?? 'Sem motorista'}"),
+            const Divider(height: 20, thickness: 0.5),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _tagPermissao((entrega['regiao'] ?? 'Região não definida').toString()),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Parada #${entrega['ordemEntrega'] ?? '-'}",
+                      style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                    // Sem código gravado não há o que bipar, então a ação nem é oferecida
+                    if (codigoEntrega.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      IconButton(
+                        onPressed: () => _modalQrCodeEntrega(context, codigoEntrega),
+                        icon: const Icon(Icons.qr_code_2, color: Colors.orange),
+                        tooltip: "Ver QR Code da entrega",
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🏷️ Etiqueta digital da entrega: exibe o QR Code que o motorista lê no app para dar baixa
+  // O conteúdo é o próprio campo 'id' (ENT-XXXXX), formato que o scanner já aceita sem alteração
+  void _modalQrCodeEntrega(BuildContext context, String codigoEntrega) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_2, color: Colors.orange),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                "Etiqueta da Entrega",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xff0F172A)),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xffE2E8F0)),
+              ),
+              // ⚠️ O SizedBox é obrigatório: QrImageView usa LayoutBuilder internamente,
+              // que não responde dimensões intrínsecas. O AlertDialog consulta as
+              // intrínsecas do content para se dimensionar e, sem esta caixa de tamanho
+              // fixo, o dialog inteiro colapsa para zero — sem lançar nenhum erro.
+              child: SizedBox(
+                width: 180,
+                height: 180,
+                child: QrImageView(
+                  data: codigoEntrega,
+                  version: QrVersions.auto,
+                  size: 180,
+                  backgroundColor: Colors.white,
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: Color(0xff0F172A),
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Color(0xff0F172A),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              codigoEntrega,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff0F172A), letterSpacing: 1.2),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "Este código deve ser lido pelo motorista no app para confirmar a saída e a entrega do pacote.",
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xff0F172A),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Fechar"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _linhaInfoEntrega(IconData icon, String texto) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: Colors.grey),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            texto,
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Paleta de status unificada com a já utilizada no Dashboard e nos KPIs do Perfil
+  Color _corDoStatus(String status) {
+    switch (status) {
+      case 'Pendente':
+        return Colors.orange;
+      case 'A Caminho':
+        return Colors.blue;
+      case 'Entregue':
+        return Colors.green;
+      case 'Atrasada':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
   }
 
   // 3. ABA MOTORISTAS
@@ -444,7 +874,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: zonaSelecionada,
+                  initialValue: zonaSelecionada,
                   decoration: const InputDecoration(
                     labelText: "Região Designada",
                     border: OutlineInputBorder(),
@@ -572,7 +1002,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                     trailing: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: (cliente['statusAtivacao'] == 'Ativo') ? Colors.green.withOpacity(0.15) : Colors.orange.withOpacity(0.15),
+                        color: (cliente['statusAtivacao'] == 'Ativo') ? Colors.green.withValues(alpha: 0.15) : Colors.orange.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -599,7 +1029,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final senhaCtrl = TextEditingController();
-    final _clienteFormKey = GlobalKey<FormState>();
+    final clienteFormKey = GlobalKey<FormState>();
 
     showModalBottomSheet(
       context: context,
@@ -608,7 +1038,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 16, right: 16, top: 24),
         child: SingleChildScrollView(
           child: Form(
-            key: _clienteFormKey,
+            key: clienteFormKey,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -650,7 +1080,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                           onPressed: controller.carregando
                               ? null
                               : () async {
-                            if (_clienteFormKey.currentState!.validate()) {
+                            if (clienteFormKey.currentState!.validate()) {
                               final authCtrl = context.read<AuthController>();
                               String empresaIdDoAdmin = authCtrl.empresaIdLogada ??
                                   FirebaseAuth.instance.currentUser?.uid ??
@@ -758,7 +1188,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                   margin: const EdgeInsets.symmetric(vertical: 4),
                   child: ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: Colors.orange.withOpacity(0.15),
+                      backgroundColor: Colors.orange.withValues(alpha: 0.15),
                       child: Text("#${entrega['ordemEntrega'] ?? '1'}", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
                     ),
                     title: Text(entrega['endereco'] ?? 'Endereço não informado', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -819,7 +1249,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                   const SizedBox(height: 12),
 
                   DropdownButtonFormField<String>(
-                    value: _regiaoRotaSelecionada,
+                    initialValue: _regiaoRotaSelecionada,
                     decoration: const InputDecoration(labelText: "Região de Entrega", border: OutlineInputBorder(), fillColor: Colors.white, filled: true),
                     items: ["Zona Norte", "Zona Sul", "Zona Leste", "Zona Oeste"].map((z) {
                       return DropdownMenuItem(value: z, child: Text(z));
@@ -835,7 +1265,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                   const SizedBox(height: 12),
 
                   DropdownButtonFormField<Map<String, dynamic>>(
-                    value: _motoristaRotaSelecionado,
+                    initialValue: _motoristaRotaSelecionado,
                     decoration: const InputDecoration(labelText: "Selecionar Motorista Responsável", border: OutlineInputBorder(), fillColor: Colors.white, filled: true),
                     hint: const Text("Selecione um motorista parceiro"),
                     items: controller.motoristas.map((m) {
@@ -1111,7 +1541,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                   Text("Plano Atual: ${controller.dadosEmpresa['planoAtual'] ?? 'Trial Gratuito'}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.orange.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                    decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
                     child: const Text("Ativo", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12)),
                   ),
                   const SizedBox(height: 12),
@@ -1203,7 +1633,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-        Switch(value: ativo, onChanged: (val) {}, activeColor: Colors.orange),
+        Switch(value: ativo, onChanged: (val) {}, activeThumbColor: Colors.orange),
       ],
     );
   }
@@ -1226,7 +1656,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
         border: Border(left: BorderSide(color: cor, width: 4)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 2, offset: const Offset(0, 1))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 2, offset: const Offset(0, 1))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
