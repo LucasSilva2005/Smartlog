@@ -1,22 +1,16 @@
 // lib/controllers/dashboard_controller.dart
 import 'package:flutter/material.dart';
-import '../services/ai_service.dart';
 
 class DashboardController extends ChangeNotifier {
   String? empresaId;
   bool _carregando = false;
-
-  // --- VARIÁVEIS E ESTADOS DA INTELIGÊNCIA ARTIFICIAL ---
-  final AIService _aiService = AIService();
-  String? _relatorioIA;
-  bool _carregandoIA = false;
-
-  // Getters da IA e do Controller
-  String? get relatorioIA => _relatorioIA;
-  bool get carregandoIA => _carregandoIA;
-  bool get carregando => _carregando;
+  String? _analiseIA;
 
   DashboardController({this.empresaId});
+
+  // --- GETTERS DE ESTADO ---
+  bool get carregando => _carregando;
+  bool get isLoading => _carregando;
 
   void inicializarDados(String idEmpresa) {
     empresaId = idEmpresa;
@@ -183,24 +177,6 @@ class DashboardController extends ChangeNotifier {
   int get totalEntregas => _entregas.length;
   int get totalMotoristasAtivos => _motoristas.where((m) => m['status'] == 'Ativo').length;
   int get totalClientesCadastrados => _clientes.length;
-
-  // --- MÉTODO DE AÇÃO DA INTELIGÊNCIA ARTIFICIAL (GEMINI) ---
-  Future<void> gerarAnaliseIA() async {
-    _carregandoIA = true;
-    notifyListeners();
-
-    try {
-      _relatorioIA = await _aiService.analisarOperacaoLogistica(
-        totalEntregas: totalEntregas,
-        entregas: _entregas,
-      );
-    } catch (e) {
-      _relatorioIA = "Falha ao gerar relatório de análise inteligente.";
-    } finally {
-      _carregandoIA = false;
-      notifyListeners();
-    }
-  }
 
   // --- MÉTODOS DE AÇÃO DO SISTEMA ---
   Future<String?> registrarBipQRCode({
