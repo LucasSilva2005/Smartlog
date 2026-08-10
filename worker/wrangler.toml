@@ -1,0 +1,7 @@
+name = "smartlog-ai-assistant"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# A OPENAI_API_KEY NÃO fica aqui. Ela é um secret:
+#   producao : npx wrangler secret put OPENAI_API_KEY
+#   local    : arquivo .dev.vars (ignorado pelo git)

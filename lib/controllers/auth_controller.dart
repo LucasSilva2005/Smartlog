@@ -18,6 +18,10 @@ class AuthController extends ChangeNotifier {
   String? _empresaIdLogada;
   String? get empresaIdLogada => _empresaIdLogada;
 
+  // Nome cadastral do usuário logado (usado pelo painel do Cliente para localizar suas entregas)
+  String? _nomeUsuarioLogado;
+  String? get nomeUsuarioLogado => _nomeUsuarioLogado;
+
   void _setCarregando(bool valor) {
     _carregando = valor;
     notifyListeners();
@@ -38,6 +42,9 @@ class AuthController extends ChangeNotifier {
 
           // Captura e salva o ID da empresa do usuário que acabou de logar
           _empresaIdLogada = dados['empresaId'];
+
+          // Aproveita a MESMA leitura do documento para guardar o nome, sem nova consulta
+          _nomeUsuarioLogado = dados['nome'];
 
           _setCarregando(false);
           // 🔥 Retorna 'tipoUsuario' padronizado em maiúsculo
@@ -84,17 +91,11 @@ class AuthController extends ChangeNotifier {
 
     try {
       String empresaIdVinculada;
+      final bool ehAdminNovo = tipo.toUpperCase() == 'ADMINISTRADOR';
 
-      if (tipo.toUpperCase() == 'ADMINISTRADOR') {
-        // Se for um novo Admin criando conta pública, gera um ID de empresa único
+      if (ehAdminNovo) {
+        // Só reserva o ID — geração é local, ainda não escreve no Firestore
         empresaIdVinculada = _db.collection('empresas').doc().id;
-
-        // Salva o registro da nova empresa no Firestore
-        await _db.collection('empresas').doc(empresaIdVinculada).set({
-          'id': empresaIdVinculada,
-          'nomeFantasia': nomeDaEmpresa ?? "Nova Empresa Logística",
-          'dataCriacao': FieldValue.serverTimestamp(),
-        });
       } else {
         if (_empresaIdLogada == null) {
           throw Exception("Ação não autorizada: Admin não está logado para vincular a empresa.");
@@ -102,6 +103,10 @@ class AuthController extends ChangeNotifier {
         empresaIdVinculada = _empresaIdLogada!;
       }
 
+      // Cria a conta ANTES de gravar a empresa. createUserWithEmailAndPassword
+      // já autentica a sessão, e as regras do Firestore exigem usuário logado
+      // para escrever em 'empresas'. Na ordem inversa, o cadastro público
+      // falharia com permission-denied.
       await _authService.cadastrarUsuario(
         nome: nome,
         email: email,
@@ -109,6 +114,15 @@ class AuthController extends ChangeNotifier {
         tipo: tipo,
         empresaId: empresaIdVinculada,
       );
+
+      if (ehAdminNovo) {
+        // Agora autenticado: registra a empresa do novo administrador
+        await _db.collection('empresas').doc(empresaIdVinculada).set({
+          'id': empresaIdVinculada,
+          'nomeFantasia': nomeDaEmpresa ?? "Nova Empresa Logística",
+          'dataCriacao': FieldValue.serverTimestamp(),
+        });
+      }
 
       _setCarregando(false);
       return true;
@@ -123,6 +137,7 @@ class AuthController extends ChangeNotifier {
   Future<void> realizarLogout() async {
     await _authService.deslogar();
     _empresaIdLogada = null;
+    _nomeUsuarioLogado = null;
     notifyListeners();
   }
 }

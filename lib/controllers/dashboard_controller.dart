@@ -174,6 +174,17 @@ class DashboardController extends ChangeNotifier {
   List<Map<String, dynamic>> get motoristas => List.unmodifiable(_motoristas);
   List<Map<String, dynamic>> get clientes => List.unmodifiable(_clientes);
 
+  // 📡 Assinaturas ativas do Firestore. Guardadas para poderem ser canceladas
+  // (evita listener duplicado a cada pull-to-refresh e vazamento no dispose)
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _inscricaoEntregas;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _inscricaoEmpresa;
+
+  // Empresa atualmente escutada — serve de trava contra reassinaturas redundantes
+  String? _empresaEscutada;
+
+  // Impede notifyListeners() depois que o controller já foi descartado
+  bool _descartado = false;
+
   int get totalEntregas => _entregas.length;
   int get totalMotoristasAtivos => _motoristas.where((m) => m['status'] == 'Ativo').length;
   int get totalClientesCadastrados => _clientes.length;

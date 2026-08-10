@@ -88,7 +88,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
 
                 // Seleção do Tipo de Usuário (Perfil)
                 DropdownButtonFormField<String>(
-                  value: _perfilSelecionado,
+                  initialValue: _perfilSelecionado,
                   decoration: const InputDecoration(
                     labelText: 'Tipo de Usuário',
                     border: OutlineInputBorder(),

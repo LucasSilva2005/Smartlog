@@ -5,6 +5,7 @@ import 'package:smartlife/screens/cadastro.dart';
 import '../controllers/auth_controller.dart';
 import 'dashboard_admin.dart';
 import 'motorista.dart';
+import 'cliente.dart';
 
 class TelaLogin extends StatefulWidget {
   const TelaLogin({super.key});
@@ -51,9 +52,13 @@ class _TelaLoginState extends State<TelaLogin> {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const DashboardMotorista(regiaoDesignada: "Zona Sul")),
         );
+      } else if (tipoTratado == 'CLIENTE') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardCliente()),
+        );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Painel do cliente em desenvolvimento.'), backgroundColor: Colors.orangeAccent),
+          const SnackBar(content: Text('Perfil de usuário não reconhecido. Contate o administrador.'), backgroundColor: Colors.orangeAccent),
         );
       }
     } else if (mounted) {

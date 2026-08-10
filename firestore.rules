@@ -1,0 +1,145 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════════════
+// SmartLog — Regras de segurança do Firestore
+//
+// Princípio: ninguém lê ou escreve nada sem estar autenticado, e cada
+// usuário só enxerga dados da PRÓPRIA empresa (isolamento multi-tenant).
+//
+// Estas regras valem também para o Cloudflare Worker do assistente, que
+// acessa o Firestore via REST usando o ID Token do próprio usuário.
+//
+// ⚠️ ANTES DE PUBLICAR: leia os dois blocos marcados com "REQUER AJUSTE
+// NO APP". Sem esses ajustes, o cadastro público e o bip do QR Code param
+// de funcionar.
+// ═══════════════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────────────────── Helpers ─────────────────────────
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    function meuUid() {
+      return request.auth.uid;
+    }
+
+    function tenhoCadastro() {
+      return exists(/databases/$(database)/documents/usuarios/$(meuUid()));
+    }
+
+    // get() dentro de regras NÃO reavalia regras — é uma leitura privilegiada
+    function meuDoc() {
+      return get(/databases/$(database)/documents/usuarios/$(meuUid())).data;
+    }
+
+    function meuTipo() {
+      return meuDoc().tipoUsuario;
+    }
+
+    function souAdmin() {
+      return tenhoCadastro() &&
+             (meuTipo() == 'ADMINISTRADOR' || meuTipo() == 'ADMIN');
+    }
+
+    function souMotorista() {
+      return tenhoCadastro() && meuTipo() == 'MOTORISTA';
+    }
+
+    // Coração do isolamento: o recurso pertence à minha empresa?
+    function daMinhaEmpresa(empresaId) {
+      return tenhoCadastro() && empresaId == meuDoc().empresaId;
+    }
+
+    // ───────────────────────── usuarios ─────────────────────────
+    match /usuarios/{uid} {
+
+      // Cada um lê o próprio cadastro; o admin lê os da sua empresa
+      allow get: if logado() && (
+                   uid == meuUid() ||
+                   (souAdmin() && daMinhaEmpresa(resource.data.empresaId))
+                 );
+
+      // Listagem de motoristas/clientes no painel do admin.
+      // A query PRECISA filtrar por empresaId, senão o Firestore recusa.
+      allow list: if logado() && souAdmin() &&
+                     daMinhaEmpresa(resource.data.empresaId);
+
+      // Dois caminhos de criação:
+      //  1. o próprio usuário no cadastro público (doc = seu uid)
+      //  2. o admin criando motorista/cliente por convite
+      allow create: if logado() && (
+                      uid == meuUid() ||
+                      (souAdmin() &&
+                       daMinhaEmpresa(request.resource.data.empresaId))
+                    );
+
+      // Só o admin da mesma empresa edita cadastros
+      allow update: if logado() && souAdmin() &&
+                       daMinhaEmpresa(resource.data.empresaId) &&
+                       request.resource.data.empresaId == resource.data.empresaId;
+
+      // Exclusão não existe no app — bloqueada
+      allow delete: if false;
+    }
+
+    // ───────────────────────── empresas ─────────────────────────
+    match /empresas/{empresaId} {
+
+      allow get: if logado() && daMinhaEmpresa(empresaId);
+      allow list: if false;
+
+      // ⚠️ REQUER AJUSTE NO APP
+      // Hoje AuthController.registrarUsuario cria a empresa ANTES de criar
+      // a conta — ou seja, sem usuário autenticado. Com a regra abaixo, o
+      // cadastro público de administrador falha.
+      // Correção: inverter a ordem em registrarUsuario (criar a conta
+      // primeiro, que já autentica, e só então gravar a empresa).
+      allow create: if logado();
+
+      allow update: if logado() && souAdmin() && daMinhaEmpresa(empresaId);
+      allow delete: if false;
+    }
+
+    // ───────────────────────── entregas ─────────────────────────
+    match /entregas/{entregaId} {
+
+      // Todos os perfis leem as entregas da própria empresa.
+      // O filtro fino (motorista vê só as suas, cliente só as dele) é
+      // aplicado no app e no Worker — aqui garantimos o limite da empresa.
+      //
+      // ⚠️ REQUER AJUSTE NO APP
+      // DashboardController.registrarBipQRCode consulta
+      //   .where('id', isEqualTo: entregaId)
+      // sem filtrar empresaId. O Firestore recusa queries que não consigam
+      // provar que só retornam documentos permitidos, então o bip vai falhar.
+      // Correção: adicionar .where('empresaId', isEqualTo: empresaId) à
+      // consulta — o que de quebra fecha um furo que já existia hoje
+      // (um motorista conseguia dar baixa em entrega de outra empresa).
+      allow get, list: if logado() && daMinhaEmpresa(resource.data.empresaId);
+
+      // Rotas são criadas pelo admin
+      allow create: if logado() && souAdmin() &&
+                       daMinhaEmpresa(request.resource.data.empresaId);
+
+      // Admin edita; motorista atualiza status no bip do QR Code.
+      // A empresa do documento não pode mudar em nenhum dos casos.
+      allow update: if logado() &&
+                       daMinhaEmpresa(resource.data.empresaId) &&
+                       request.resource.data.empresaId == resource.data.empresaId &&
+                       (souAdmin() || souMotorista());
+
+      allow delete: if false;
+    }
+
+    // ──────────────── Bloqueio padrão (fail closed) ────────────────
+    // Qualquer coleção não declarada acima fica inacessível. Coleções
+    // novas precisam de uma regra explícita para funcionar.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
