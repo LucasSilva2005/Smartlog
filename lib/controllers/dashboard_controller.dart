@@ -611,10 +611,24 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // A consulta PRECISA ser escopada pela empresa. Duas razões:
+      //  1. Segurança: sem isso, um motorista dá baixa em entrega de outra
+      //     empresa apenas conhecendo o código.
+      //  2. Regras do Firestore: o servidor recusa queries que não consiga
+      //     provar que retornam somente documentos permitidos.
+      final String? empresaId = _empresaEscutada;
+      if (empresaId == null) {
+        debugPrint("Bip recusado: empresa da sessão ainda não carregada.");
+        _carregando = false;
+        notifyListeners();
+        return "ERRO";
+      }
+
       // 1. Localiza a entrega correspondente na memória local ou Firestore
       // Como o Admin cria gerando IDs dinâmicos, vamos buscar pelo campo id da entrega
       final querySnapshot = await _firestore
           .collection('entregas')
+          .where('empresaId', isEqualTo: empresaId)
           .where('id', isEqualTo: entregaId)
           .limit(1)
           .get();

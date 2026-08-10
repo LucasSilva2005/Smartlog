@@ -41,6 +41,12 @@ migrate_working_dir/
 # Cloud Functions
 functions/node_modules/
 
+# Node na raiz: este projeto e Flutter, nao Node. Se aparecerem aqui,
+# foi npm/yarn rodado no diretorio errado — o correto e dentro de functions/
+/node_modules/
+/yarn.lock
+/package-lock.json
+
 # Symbolication related
 app.*.symbols
 

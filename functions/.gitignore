@@ -1,4 +1,10 @@
 node_modules/
 *.log
+*.local
+
+# Segredos — a chave da OpenAI vai no Firebase Secret Manager,
+# via: firebase functions:secrets:set OPENAI_API_KEY
 .env
-.env.local
+.env.*
+# ...menos o modelo sem valores, que serve de documentacao
+!.env.example
