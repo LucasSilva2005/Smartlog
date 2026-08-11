@@ -8,7 +8,38 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/chat_controller.dart';
+import '../controllers/dashboard_controller.dart';
 import '../models/chat_mensagem.dart';
+
+/// Resume a operação exibida na tela para enviar como contexto ao assistente.
+/// Mantém o payload enxuto: agregados completos + amostra das entregas.
+Map<String, dynamic> _montarContexto(DashboardController d, String perfil) {
+  final entregas = d.entregas;
+
+  final Map<String, int> porStatus = {};
+  final Map<String, int> porRegiao = {};
+  for (final e in entregas) {
+    final s = (e['status'] ?? 'Pendente').toString();
+    porStatus[s] = (porStatus[s] ?? 0) + 1;
+    final r = (e['regiao'] ?? '').toString();
+    if (r.isNotEmpty) porRegiao[r] = (porRegiao[r] ?? 0) + 1;
+  }
+
+  return {
+    'perfil': perfil,
+    'totalEntregas': d.totalEntregas,
+    'totalMotoristasAtivos': d.totalMotoristasAtivos,
+    'totalClientesCadastrados': d.totalClientesCadastrados,
+    'distribuicaoPorStatus': porStatus,
+    'distribuicaoPorRegiao': porRegiao,
+    'motoristas': d.motoristas,
+    // Amostra: o suficiente para citar entregas sem estourar tokens
+    'entregas': entregas.take(40).toList(),
+    'observacao': entregas.length > 40
+        ? 'Lista truncada nas 40 primeiras; os totais acima consideram todas as ${entregas.length}.'
+        : null,
+  };
+}
 
 class ChatAssistenteScreen extends StatelessWidget {
   /// ADMINISTRADOR, MOTORISTA ou CLIENTE — define as sugestões e o escopo de dados.
@@ -19,8 +50,16 @@ class ChatAssistenteScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Captura o controller do painel para alimentar o assistente com os
+    // mesmos dados que o usuário está vendo na tela.
+    final DashboardController dashboard = context.read<DashboardController>();
+
     return ChangeNotifierProvider<ChatController>(
-      create: (_) => ChatController(uid: uid, perfil: perfil),
+      create: (_) => ChatController(
+        uid: uid,
+        perfil: perfil,
+        contextoBuilder: () => _montarContexto(dashboard, perfil),
+      ),
       child: const _ChatAssistenteView(),
     );
   }

@@ -164,7 +164,8 @@ class _DashboardClienteState extends State<DashboardCliente> {
                 onRefresh: () async {
                   final String? empresaId = authController.empresaIdLogada ?? FirebaseAuth.instance.currentUser?.uid;
                   if (empresaId != null) {
-                    await controller.inicializarDados(empresaId);
+                    // inicializarDados é síncrono nesta versão do controller
+                    controller.inicializarDados(empresaId);
                   }
                 },
                 // physics sempre rolável para o "puxar para atualizar" funcionar também no estado vazio
