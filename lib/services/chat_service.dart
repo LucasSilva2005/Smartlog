@@ -44,6 +44,7 @@ class ChatService {
     required String perfil,
     required String pergunta,
     List<Map<String, String>> historico = const [],
+    Map<String, dynamic> contexto = const {},
   }) async {
     try {
       // ── Autenticação: sem usuário logado, nem sai do app ──────────
@@ -75,6 +76,11 @@ class ChatService {
             body: jsonEncode({
               'pergunta': pergunta,
               'historico': historico,
+              // O Worker autenticado ignora este campo e monta o contexto a
+              // partir do Firestore. O Worker atualmente publicado (sem auth)
+              // usa este contexto — é o que faz o assistente responder sobre
+              // os dados que estão na tela.
+              'contexto': {'perfil': perfil, ...contexto},
             }),
           )
           .timeout(tempoLimite);

@@ -1,9 +1,11 @@
 // lib/screens/dashboard_admin.dart
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/dashboard_controller.dart';
 import '../theme/app_theme.dart';
+import 'chat_assistente.dart';
 
 class DashboardAdmin extends StatefulWidget {
   const DashboardAdmin({super.key});
@@ -47,6 +49,27 @@ class _DashboardAdminState extends State<DashboardAdmin> {
             _itemMenu(Icons.badge_outlined, Icons.badge, "Motoristas"),
             _itemMenu(Icons.store_outlined, Icons.store, "Clientes"),
             _itemMenu(Icons.person_outline, Icons.person, "Perfil"),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.support_agent, color: AppTheme.accentOrange),
+              title: const Text(
+                "Assistente IA",
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                "Pergunte sobre a operação",
+                style: TextStyle(fontSize: 11),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ChatAssistenteScreen(
+                    perfil: "ADMINISTRADOR",
+                    uid: FirebaseAuth.instance.currentUser?.uid ?? "",
+                  ),
+                ));
+              },
+            ),
           ],
         ),
       ),
