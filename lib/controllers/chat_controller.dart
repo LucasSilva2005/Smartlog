@@ -20,10 +20,15 @@ class ChatController extends ChangeNotifier {
   bool _enviando = false;
   bool _descartado = false;
 
+  /// Monta o contexto operacional no momento da pergunta. Fica como callback
+  /// (e não como Map fixo) para que cada pergunta enxergue o estado atual.
+  final Map<String, dynamic> Function()? contextoBuilder;
+
   ChatController({
     required this.uid,
     required this.perfil,
     ChatService? service,
+    this.contextoBuilder,
   }) : _service = service ?? ChatService() {
     _conversa = Conversa(perfil: perfil);
   }
@@ -77,6 +82,7 @@ class ChatController extends ChangeNotifier {
       perfil: perfil,
       pergunta: pergunta,
       historico: historico,
+      contexto: contextoBuilder?.call() ?? const {},
     );
 
     _conversa.adicionar(

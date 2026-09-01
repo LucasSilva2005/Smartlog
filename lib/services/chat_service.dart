@@ -1,18 +1,18 @@
 // lib/services/chat_service.dart
 //
-// Única porta de saída do app rumo ao Assistente Logístico (SmartLog).
+// Única porta de saída do app rumo ao Assistente Logístico.
 //
 // A chave da OpenAI NÃO existe neste projeto Flutter: este serviço apenas
 // faz um POST autenticado para o Cloudflare Worker, que é quem detém a chave
-// e orquestra com a OpenAI no servidor de forma segura.
+// e conversa com a OpenAI no servidor.
 //
 // Autenticação: reaproveita o Firebase Authentication já existente no app.
 // Enviamos o ID Token no header Authorization; o Worker verifica a assinatura
-// criptograficamente e deriva a identidade dali.
+// criptograficamente e deriva a identidade dali. O uid NÃO é enviado no corpo
+// — ele não serviria como prova de identidade, apenas como alegação.
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
@@ -26,7 +26,7 @@ class ChatService {
   /// Endpoint do assistente.
   static const String caminhoChat = '/chat';
 
-  /// Limite de espera por resposta da IA.
+  /// Mesmo teto que o backend aplica por requisição.
   static const Duration tempoLimite = Duration(seconds: 60);
 
   final http.Client _client;
@@ -36,15 +36,18 @@ class ChatService {
       : _client = client ?? http.Client(),
         _auth = auth ?? FirebaseAuth.instance;
 
-  /// Método consumido pelo ChatController
   Future<Resposta> perguntar({
+    // Mantidos para não alterar a chamada existente no ChatController.
+    // Nenhum dos dois é enviado ao servidor: a identidade e o perfil passaram
+    // a ser derivados do ID Token verificado e do Firestore, no Worker.
     required String uid,
     required String perfil,
     required String pergunta,
     List<Map<String, String>> historico = const [],
+    Map<String, dynamic> contexto = const {},
   }) async {
     try {
-      // ── Autenticação: sem usuário logado, não dispara a requisição ──
+      // ── Autenticação: sem usuário logado, nem sai do app ──────────
       final User? usuario = _auth.currentUser;
       if (usuario == null) {
         return Resposta.falha(
@@ -65,19 +68,25 @@ class ChatService {
 
       final http.Response resposta = await _client
           .post(
-        url,
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({
-          'pergunta': pergunta,
-          'historico': historico,
-        }),
-      )
+            url,
+            headers: {
+              'Content-Type': 'application/json; charset=utf-8',
+              'Authorization': 'Bearer $idToken',
+            },
+            body: jsonEncode({
+              'pergunta': pergunta,
+              'historico': historico,
+              // O Worker autenticado ignora este campo e monta o contexto a
+              // partir do Firestore. O Worker atualmente publicado (sem auth)
+              // usa este contexto — é o que faz o assistente responder sobre
+              // os dados que estão na tela.
+              'contexto': {'perfil': perfil, ...contexto},
+            }),
+          )
           .timeout(tempoLimite);
 
-      // Decodificação garantida em UTF-8 para não corromper acentuação
+      // bodyBytes + utf8 é obrigatório: usar resposta.body corromperia
+      // os acentos do português devolvido pelo assistente.
       final String corpo = utf8.decode(resposta.bodyBytes);
 
       Map<String, dynamic>? json;
@@ -112,11 +121,6 @@ class ChatService {
         'Sua sessão expirou. Entre novamente para usar o assistente.',
         codigo: 'auth',
       );
-    } on SocketException {
-      return Resposta.falha(
-        'Servidor do assistente inacessível. Verifique sua conexão e tente novamente.',
-        codigo: 'offline',
-      );
     } on http.ClientException {
       return Resposta.falha(
         'Não foi possível falar com o assistente agora. Verifique sua conexão e tente novamente.',
@@ -130,32 +134,9 @@ class ChatService {
     }
   }
 
-  /// Método simplificado consumido diretamente pelo DashboardAdmin
-  Future<String> enviarMensagem(String prompt, {String? contexto}) async {
-    final User? usuario = _auth.currentUser;
-    final String uid = usuario?.uid ?? '';
-
-    final Resposta resposta = await perguntar(
-      uid: uid,
-      perfil: 'ADMIN',
-      pergunta: contexto != null && contexto.isNotEmpty
-          ? "$prompt\n[Contexto Operacional: $contexto]"
-          : prompt,
-    );
-
-    // No model Resposta, a mensagem (sucesso ou falha) fica no campo texto
-    if (resposta.sucesso) {
-      return resposta.texto;
-    } else {
-      return resposta.texto.isNotEmpty
-          ? resposta.texto
-          : 'Não foi possível obter resposta do assistente.';
-    }
-  }
-
   String _mensagemAmigavel(int status, Map<String, dynamic>? json) {
-    // Retorna erro específico devolvido pelo Worker se houver
-    final String? doServidor = json?['erro']?.toString() ?? json?['message']?.toString();
+    // Erros de validação (400) já vêm com texto preciso e acionável do Worker
+    final String? doServidor = json?['erro']?.toString();
     if (status == 400 && doServidor != null && doServidor.isNotEmpty) {
       return doServidor;
     }
@@ -164,9 +145,9 @@ class ChatService {
       case 400:
         return 'A pergunta enviada é inválida. Tente reformulá-la.';
       case 401:
-        return 'Sua sessão expirou (HTTP 401). Entre novamente para usar o assistente.';
+        return 'Sua sessão expirou. Entre novamente para usar o assistente.';
       case 403:
-        return 'Acesso negado (HTTP 403): Seu perfil não tem autorização para este recurso.';
+        return 'Seu perfil não tem acesso ao assistente.';
       case 404:
         return 'O assistente ainda não foi publicado. Faça o deploy do Worker para ativá-lo.';
       case 405:
@@ -175,10 +156,10 @@ class ChatService {
         return 'A conversa ficou grande demais. Limpe o histórico e tente novamente.';
       case 429:
         return 'Limite de uso do assistente atingido. Tente novamente mais tarde.';
-      case 502:
-        return 'O assistente não conseguiu responder agora (HTTP 502). Tente novamente.';
       case 503:
-        return 'O assistente está sem a chave da OpenAI configurada no servidor (HTTP 503).';
+        return 'O assistente está sem a chave da OpenAI configurada no servidor.';
+      case 502:
+        return 'O assistente não conseguiu responder agora. Tente novamente.';
       default:
         return 'O assistente não conseguiu responder agora (HTTP $status).';
     }

@@ -1,11 +1,11 @@
 // lib/screens/dashboard_admin.dart
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 import '../controllers/dashboard_controller.dart';
-import '../services/chat_service.dart';
 import '../theme/app_theme.dart';
+import 'chat_assistente.dart';
 
 class DashboardAdmin extends StatefulWidget {
   const DashboardAdmin({super.key});
@@ -16,187 +16,93 @@ class DashboardAdmin extends StatefulWidget {
 
 class _DashboardAdminState extends State<DashboardAdmin> {
   String _abaAtual = "Dashboard";
-  bool _dadosInicializados = false;
-
-  // Estados e Controllers para a Edição Dinâmica do Perfil do Administrador/Empresa
-  bool _editandoPerfil = false;
-  final _formPerfilKey = GlobalKey<FormState>();
-
-  final TextEditingController _nomeAdminCtrl = TextEditingController();
-  final TextEditingController _funcaoCtrl = TextEditingController();
-  final TextEditingController _emailAdminCtrl = TextEditingController();
-  final TextEditingController _nomeEmpresaCtrl = TextEditingController();
-  final TextEditingController _razaoSocialCtrl = TextEditingController();
-  final TextEditingController _nomeFantasiaCtrl = TextEditingController();
-  final TextEditingController _cnpjCtrl = TextEditingController();
-  final TextEditingController _enderecoCtrl = TextEditingController();
-  final TextEditingController _telefoneCtrl = TextEditingController();
-  final TextEditingController _siteCtrl = TextEditingController();
-
-  final TextEditingController _promptController = TextEditingController();
-  final ChatService _chatService = ChatService();
-  String _respostaIA = "";
-  bool _carregandoIA = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<DashboardController>().carregarEntregas();
-    });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_dadosInicializados) {
-      final controller = context.read<DashboardController>();
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        controller.inicializarDados(user.uid);
-        controller.escutarDadosEmpresa(user.uid);
-      }
-      _dadosInicializados = true;
-    }
-  }
-
-  @override
-  void dispose() {
-    _promptController.dispose();
-    _nomeAdminCtrl.dispose();
-    _funcaoCtrl.dispose();
-    _emailAdminCtrl.dispose();
-    _nomeEmpresaCtrl.dispose();
-    _razaoSocialCtrl.dispose();
-    _nomeFantasiaCtrl.dispose();
-    _cnpjCtrl.dispose();
-    _enderecoCtrl.dispose();
-    _telefoneCtrl.dispose();
-    _siteCtrl.dispose();
-    super.dispose();
-  }
-
-  void _preencherControllersPerfil(Map<String, dynamic> dados) {
-    _nomeAdminCtrl.text = dados['nomeAdmin'] ?? 'Carlos Henrique';
-    _funcaoCtrl.text = dados['funcao'] ?? 'Administrador Geral';
-    _emailAdminCtrl.text = dados['email'] ?? FirebaseAuth.instance.currentUser?.email ?? 'admin@smartlog.com.br';
-    _nomeEmpresaCtrl.text = dados['nomeEmpresa'] ?? 'SmartLog Online';
-    _razaoSocialCtrl.text = dados['razaoSocial'] ?? '';
-    _nomeFantasiaCtrl.text = dados['nomeFantasia'] ?? '';
-    _cnpjCtrl.text = dados['cnpj'] ?? '';
-    _enderecoCtrl.text = dados['endereco'] ?? '';
-    _telefoneCtrl.text = dados['telefone'] ?? '';
-    _siteCtrl.text = dados['site'] ?? '';
-  }
-
-  Future<void> _perguntarIA(DashboardController controller) async {
-    final pergunta = _promptController.text.trim();
-    if (pergunta.isEmpty) return;
-
-    setState(() {
-      _carregandoIA = true;
-      _respostaIA = "";
-    });
-
-    try {
-      final resposta = await _chatService.enviarMensagem(pergunta);
-      setState(() {
-        _respostaIA = resposta;
-      });
-    } catch (e) {
-      setState(() {
-        _respostaIA = "Erro ao consultar assistente: $e";
-      });
-    } finally {
-      setState(() {
-        _carregandoIA = false;
-      });
-    }
-  }
+  String _zonaSelecionada = "TODAS";
+  DateTime? _dataSelecionada;
 
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<DashboardController>();
 
     return Scaffold(
-      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: Text("SmartLog • $_abaAtual"),
-        backgroundColor: AppTheme.primaryDark,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: "Recarregar Entregas",
-            onPressed: () => controller.carregarEntregas(),
-          ),
-        ],
+      ),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            const UserAccountsDrawerHeader(
+              decoration: BoxDecoration(color: AppTheme.primaryDark),
+              accountName: Text(
+                "Administrador Geral",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              accountEmail: Text("admin@smartlog.com.br"),
+              currentAccountPicture: CircleAvatar(
+                backgroundColor: AppTheme.accentOrange,
+                child: Icon(Icons.admin_panel_settings, color: Colors.white, size: 30),
+              ),
+            ),
+            _itemMenu(Icons.dashboard_outlined, Icons.dashboard, "Dashboard"),
+            _itemMenu(Icons.local_shipping_outlined, Icons.local_shipping, "Entregas"),
+            _itemMenu(Icons.map_outlined, Icons.map, "Rotas"),
+            _itemMenu(Icons.badge_outlined, Icons.badge, "Motoristas"),
+            _itemMenu(Icons.store_outlined, Icons.store, "Clientes"),
+            _itemMenu(Icons.person_outline, Icons.person, "Perfil"),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.support_agent, color: AppTheme.accentOrange),
+              title: const Text(
+                "Assistente IA",
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                "Pergunte sobre a operação",
+                style: TextStyle(fontSize: 11),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ChatAssistenteScreen(
+                    perfil: "ADMINISTRADOR",
+                    uid: FirebaseAuth.instance.currentUser?.uid ?? "",
+                  ),
+                ));
+              },
+            ),
+          ],
+        ),
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 250),
         child: _renderizarConteudo(controller),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _obterIndexAbaAtual(),
-        onTap: (index) {
-          setState(() {
-            _abaAtual = _obterNomeAbaPorIndex(index);
-          });
-        },
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: AppTheme.accentOrange,
-        unselectedItemColor: AppTheme.statusGrey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.dashboard_outlined),
-            activeIcon: Icon(Icons.dashboard),
-            label: "Dashboard",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.local_shipping_outlined),
-            activeIcon: Icon(Icons.local_shipping),
-            label: "Entregas",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.map_outlined),
-            activeIcon: Icon(Icons.map),
-            label: "Rotas",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.badge_outlined),
-            activeIcon: Icon(Icons.badge),
-            label: "Motoristas",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: "Perfil",
-          ),
-        ],
-      ),
     );
   }
 
-  int _obterIndexAbaAtual() {
-    switch (_abaAtual) {
-      case "Dashboard": return 0;
-      case "Entregas": return 1;
-      case "Rotas": return 2;
-      case "Motoristas": return 3;
-      case "Perfil": return 4;
-      default: return 0;
-    }
-  }
-
-  String _obterNomeAbaPorIndex(int index) {
-    switch (index) {
-      case 0: return "Dashboard";
-      case 1: return "Entregas";
-      case 2: return "Rotas";
-      case 3: return "Motoristas";
-      case 4: return "Perfil";
-      default: return "Dashboard";
-    }
+  Widget _itemMenu(IconData iconInativo, IconData iconAtivo, String titulo) {
+    final bool selecionado = _abaAtual == titulo;
+    return ListTile(
+      leading: Icon(
+        selecionado ? iconAtivo : iconInativo,
+        color: selecionado ? AppTheme.accentOrange : AppTheme.statusGrey,
+      ),
+      title: Text(
+        titulo,
+        style: TextStyle(
+          fontWeight: selecionado ? FontWeight.bold : FontWeight.normal,
+          color: selecionado ? AppTheme.primaryDark : Colors.black87,
+        ),
+      ),
+      selected: selecionado,
+      selectedTileColor: AppTheme.accentOrange.withOpacity(0.08),
+      onTap: () {
+        setState(() {
+          _abaAtual = titulo;
+        });
+        Navigator.pop(context);
+      },
+    );
   }
 
   Widget _renderizarConteudo(DashboardController controller) {
@@ -209,14 +115,16 @@ class _DashboardAdminState extends State<DashboardAdmin> {
         return _buildAbaRotas(controller);
       case "Motoristas":
         return _buildAbaMotoristas(controller);
+      case "Clientes":
+        return _buildAbaClientes(controller);
       case "Perfil":
-        return _buildAbaPerfil(controller);
+        return _buildAbaPerfil();
       default:
         return _buildDashboardPrincipal(controller);
     }
   }
 
-  // 1. DASHBOARD PRINCIPAL
+  // 1. DASHBOARD PRINCIPAL (COM COPILOTO IA CORRIGIDO)
   Widget _buildDashboardPrincipal(DashboardController controller) {
     return SingleChildScrollView(
       key: const ValueKey("DashboardView"),
@@ -226,7 +134,11 @@ class _DashboardAdminState extends State<DashboardAdmin> {
         children: [
           const Text(
             "Visão Geral da Operação",
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.primaryDark,
+            ),
           ),
           const SizedBox(height: 16),
           GridView.count(
@@ -242,74 +154,27 @@ class _DashboardAdminState extends State<DashboardAdmin> {
               _Card("Clientes Parceiros", controller.totalClientesCadastrados.toString(), Icons.people_outline, Colors.purple),
             ],
           ),
-          const SizedBox(height: 24),
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.auto_awesome, color: AppTheme.accentOrange, size: 22),
-                      SizedBox(width: 8),
-                      Text(
-                        "Copiloto IA Logístico",
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _promptController,
-                    decoration: InputDecoration(
-                      hintText: "Ex: Como está a distribuição regional da frota?",
-                      suffixIcon: IconButton(
-                        icon: _carregandoIA
-                            ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                            : const Icon(Icons.send, color: AppTheme.primaryDark),
-                        onPressed: _carregandoIA ? null : () => _perguntarIA(controller),
-                      ),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    onSubmitted: (_) => _perguntarIA(controller),
-                  ),
-                  if (_respostaIA.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.backgroundLight,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppTheme.statusGrey.withOpacity(0.3)),
-                      ),
-                      child: Text(
-                        _respostaIA,
-                        style: const TextStyle(fontSize: 13, color: AppTheme.primaryDark),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
+          const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  // 2. ENTREGAS (Com o único botão centralizado de cadastro simplificado)
+  // 2. ENTREGAS (COM DATA E REGIÃO)
   Widget _buildAbaEntregas(DashboardController controller) {
-    if (controller.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    final entregasFiltradas = controller.entregas.where((e) {
+      final bool bateRegiao = _zonaSelecionada == "TODAS" ||
+          e['regiao'].toString().toLowerCase() == _zonaSelecionada.toLowerCase();
+
+      bool bateData = true;
+      if (_dataSelecionada != null) {
+        final String dataFormatada =
+            "${_dataSelecionada!.year}-${_dataSelecionada!.month.toString().padLeft(2, '0')}-${_dataSelecionada!.day.toString().padLeft(2, '0')}";
+        bateData = e['data'] == dataFormatada;
+      }
+
+      return bateRegiao && bateData;
+    }).toList();
 
     return Padding(
       key: const ValueKey("EntregasView"),
@@ -317,39 +182,125 @@ class _DashboardAdminState extends State<DashboardAdmin> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                "Gestão de Entregas",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff0F172A)),
+          // FILTRO POR DATA
+          Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.calendar_month, size: 20, color: AppTheme.primaryDark),
+                      const SizedBox(width: 8),
+                      Text(
+                        _dataSelecionada == null
+                            ? "Todas as Datas"
+                            : "Data: ${_dataSelecionada!.day.toString().padLeft(2, '0')}/${_dataSelecionada!.month.toString().padLeft(2, '0')}/${_dataSelecionada!.year}",
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      if (_dataSelecionada != null)
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.red),
+                          onPressed: () => setState(() => _dataSelecionada = null),
+                        ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: _dataSelecionada ?? DateTime(2026, 7, 25),
+                            firstDate: DateTime(2026, 1, 1),
+                            lastDate: DateTime(2026, 12, 31),
+                          );
+                          if (picked != null) {
+                            setState(() => _dataSelecionada = picked);
+                          }
+                        },
+                        child: const Text("Filtrar Data"),
+                      ),
+                    ],
+                  )
+                ],
               ),
-              ElevatedButton.icon(
-                onPressed: () => _modalCadastroEntrega(context, controller),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text("Nova Entrega"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff0F172A),
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
+            ),
           ),
-          const SizedBox(height: 16),
+
+          // FILTRO POR REGIÃO (CHIPS)
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: ["TODAS", "Norte", "Sul", "Leste", "Oeste"].map((zona) {
+                final isSelected = _zonaSelecionada == zona;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: ChoiceChip(
+                    label: Text(zona),
+                    selected: isSelected,
+                    selectedColor: AppTheme.accentOrange,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : AppTheme.primaryDark,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    onSelected: (selected) {
+                      if (selected) setState(() => _zonaSelecionada = zona);
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          Text(
+            "Exibindo ${entregasFiltradas.length} entregas",
+            style: const TextStyle(color: AppTheme.statusGrey, fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 8),
+
           Expanded(
-            child: controller.entregas.isEmpty
-                ? const Center(child: Text("Nenhuma entrega cadastrada."))
+            child: entregasFiltradas.isEmpty
+                ? const Center(child: Text("Nenhuma entrega encontrada."))
                 : ListView.builder(
-              itemCount: controller.entregas.length,
+              itemCount: entregasFiltradas.length,
               itemBuilder: (context, index) {
-                final entrega = controller.entregas[index];
+                final entrega = entregasFiltradas[index];
+                final status = entrega['status'];
+
+                final Color statusColor = status == 'Entregue'
+                    ? AppTheme.statusGreen
+                    : status == 'Em Rota'
+                    ? AppTheme.statusOrange
+                    : AppTheme.statusGrey;
+
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
-                    title: Text(entrega['nome'] ?? 'Cliente', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(entrega['endereco'] ?? ''),
-                    trailing: Chip(
-                      label: Text(entrega['status'] ?? 'Pendente', style: const TextStyle(fontSize: 11)),
+                    leading: const CircleAvatar(
+                      backgroundColor: AppTheme.backgroundLight,
+                      child: Icon(Icons.local_shipping, color: AppTheme.primaryDark),
+                    ),
+                    title: Text(
+                      "${entrega['id']} • ${entrega['cliente']}",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text("${entrega['endereco']}\nRegião: ${entrega['regiao']} | Data: ${entrega['data']}"),
+                    isThreeLine: true,
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: statusColor, width: 1),
+                      ),
+                      child: Text(
+                        status,
+                        style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
                 );
@@ -361,134 +312,12 @@ class _DashboardAdminState extends State<DashboardAdmin> {
     );
   }
 
-  // Modal Único de Cadastro de Entrega Simplificada
-  void _modalCadastroEntrega(BuildContext context, DashboardController controller) {
-    final nomeCtrl = TextEditingController();
-    final enderecoCtrl = TextEditingController();
-    final telefoneCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            top: 24,
-            left: 16,
-            right: 16,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Nova Entrega Simplificada",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff0F172A)),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: nomeCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Nome do Destinatário",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person_outline),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: enderecoCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Endereço de Entrega",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.location_on_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: telefoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: "Telefone / WhatsApp",
-                    hintText: "Ex: 11999998888",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.phone_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: emailCtrl,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: "E-mail do Cliente",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.email_outlined),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: () async {
-                      final nome = nomeCtrl.text.trim();
-                      final endereco = enderecoCtrl.text.trim();
-                      final telefone = telefoneCtrl.text.trim();
-                      final email = emailCtrl.text.trim();
-
-                      if (nome.isEmpty || endereco.isEmpty || telefone.isEmpty || email.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Preencha todos os campos.")),
-                        );
-                        return;
-                      }
-
-                      final sucesso = await controller.cadastrarEntregaSimplificada(
-                        nome: nome,
-                        endereco: endereco,
-                        telefone: telefone,
-                        email: email,
-                      );
-
-                      if (ctx.mounted) Navigator.pop(ctx);
-
-                      if (sucesso && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text("Entrega salva! Link de rastreio gerado para $telefone"),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      }
-                    },
-                    child: const Text("Salvar e Gerar Link de Rastreio", style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   // 3. ROTAS
   Widget _buildAbaRotas(DashboardController controller) {
     return Padding(
       key: const ValueKey("RotasView"),
       padding: const EdgeInsets.all(16),
-      child: controller.rotas.isEmpty
-          ? const Center(child: Text("Nenhuma rota cadastrada."))
-          : ListView.builder(
+      child: ListView.builder(
         itemCount: controller.rotas.length,
         itemBuilder: (context, index) {
           final rota = controller.rotas[index];
@@ -499,10 +328,10 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                 backgroundColor: AppTheme.backgroundLight,
                 child: Icon(Icons.alt_route, color: AppTheme.accentOrange),
               ),
-              title: Text(rota['nome'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text("Motorista: ${rota['motorista'] ?? 'Não alocado'}\nVeículo: ${rota['veiculo'] ?? 'N/D'}"),
+              title: Text(rota['nome'], style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text("Motorista: ${rota['motorista']}\nVeículo: ${rota['veiculo']}"),
               trailing: Chip(
-                label: Text(rota['status'] ?? 'Pendente', style: const TextStyle(fontSize: 11, color: AppTheme.primaryDark)),
+                label: Text(rota['status'], style: const TextStyle(fontSize: 11, color: AppTheme.primaryDark)),
                 backgroundColor: AppTheme.backgroundLight,
               ),
             ),
@@ -536,9 +365,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: controller.motoristas.isEmpty
-                ? const Center(child: Text("Nenhum motorista cadastrado."))
-                : ListView.builder(
+            child: ListView.builder(
               itemCount: controller.motoristas.length,
               itemBuilder: (context, index) {
                 final m = controller.motoristas[index];
@@ -549,8 +376,8 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                       backgroundColor: AppTheme.accentOrange,
                       child: Icon(Icons.person, color: Colors.white),
                     ),
-                    title: Text(m['nome'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text("${m['email'] ?? ''} • Região: ${m['regiaoDesignada'] ?? m['regiao'] ?? ''}"),
+                    title: Text(m['nome'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text("${m['email']} • Região: ${m['regiao']}"),
                   ),
                 );
               },
@@ -602,7 +429,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: zonaSelecionadaModal,
+                      initialValue: zonaSelecionadaModal,
                       decoration: const InputDecoration(labelText: "Região Deslocada", border: OutlineInputBorder()),
                       items: ["Zona Sul", "Zona Norte", "Zona Leste", "Zona Oeste"]
                           .map((z) => DropdownMenuItem(value: z, child: Text(z)))
@@ -642,223 +469,51 @@ class _DashboardAdminState extends State<DashboardAdmin> {
     );
   }
 
-  // 5. ABA PERFIL DO ADMINISTRADOR E DA EMPRESA
-  Widget _buildAbaPerfil(DashboardController controller) {
-    final dados = controller.dadosEmpresa;
-
-    if (!_editandoPerfil) {
-      _preencherControllersPerfil(dados);
-    }
-
-    return SingleChildScrollView(
-      key: const ValueKey("PerfilView"),
+  // 5. CLIENTES
+  Widget _buildAbaClientes(DashboardController controller) {
+    return Padding(
+      key: const ValueKey("ClientesView"),
       padding: const EdgeInsets.all(16),
-      child: Form(
-        key: _formPerfilKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "Perfil",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    if (_editandoPerfil) {
-                      if (_formPerfilKey.currentState!.validate()) {
-                        final novosDados = {
-                          'nomeAdmin': _nomeAdminCtrl.text.trim(),
-                          'funcao': _funcaoCtrl.text.trim(),
-                          'email': _emailAdminCtrl.text.trim(),
-                          'nomeEmpresa': _nomeEmpresaCtrl.text.trim(),
-                          'razaoSocial': _razaoSocialCtrl.text.trim(),
-                          'nomeFantasia': _nomeFantasiaCtrl.text.trim(),
-                          'cnpj': _cnpjCtrl.text.trim(),
-                          'endereco': _enderecoCtrl.text.trim(),
-                          'telefone': _telefoneCtrl.text.trim(),
-                          'site': _siteCtrl.text.trim(),
-                        };
-
-                        final userUid = FirebaseAuth.instance.currentUser?.uid ?? "";
-                        final sucesso = await controller.atualizarPerfilEmpresa(
-                          empresaId: userUid,
-                          novosDados: novosDados,
-                        );
-
-                        if (sucesso && mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Perfil atualizado com sucesso!")),
-                          );
-                          setState(() {
-                            _editandoPerfil = false;
-                          });
-                        }
-                      }
-                    } else {
-                      setState(() {
-                        _editandoPerfil = true;
-                      });
-                    }
-                  },
-                  icon: Icon(_editandoPerfil ? Icons.save : Icons.edit),
-                  label: Text(_editandoPerfil ? "Salvar Alterações" : "Editar Dados"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _editandoPerfil ? AppTheme.statusGreen : AppTheme.primaryDark,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Cabeçalho do Administrador
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    const CircleAvatar(
-                      radius: 35,
-                      backgroundColor: AppTheme.primaryDark,
-                      child: Icon(Icons.admin_panel_settings, color: AppTheme.accentOrange, size: 35),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _editandoPerfil
-                              ? TextFormField(
-                            controller: _nomeAdminCtrl,
-                            decoration: const InputDecoration(labelText: "Nome do Administrador"),
-                            validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null,
-                          )
-                              : Text(
-                            dados['nomeAdmin'] ?? "Carlos Henrique",
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
-                          ),
-                          const SizedBox(height: 4),
-                          _editandoPerfil
-                              ? TextFormField(
-                            controller: _funcaoCtrl,
-                            decoration: const InputDecoration(labelText: "Função / Cargo"),
-                          )
-                              : Text(
-                            dados['funcao'] ?? "Administrador Geral",
-                            style: const TextStyle(color: AppTheme.accentOrange, fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 4),
-                          _editandoPerfil
-                              ? TextFormField(
-                            controller: _emailAdminCtrl,
-                            decoration: const InputDecoration(labelText: "E-mail de Contato"),
-                          )
-                              : Text(
-                            dados['email'] ?? FirebaseAuth.instance.currentUser?.email ?? "admin@smartlog.com.br",
-                            style: const TextStyle(color: AppTheme.statusGrey, fontSize: 13),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+      child: ListView.builder(
+        itemCount: controller.clientes.length,
+        itemBuilder: (context, index) {
+          final cliente = controller.clientes[index];
+          return Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: AppTheme.backgroundLight,
+                child: Icon(Icons.store, color: AppTheme.primaryDark),
               ),
+              title: Text(cliente['nome'], style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text("Tipo: ${cliente['tipo']} | Cidade: ${cliente['cidade']}"),
             ),
-            const SizedBox(height: 16),
-
-            // Informações da Empresa
-            const Text(
-              "Informações da Empresa",
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
-            ),
-            const SizedBox(height: 8),
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    _editandoPerfil
-                        ? TextFormField(
-                      controller: _nomeEmpresaCtrl,
-                      decoration: const InputDecoration(labelText: "Nome da Empresa"),
-                    )
-                        : _linhaDetalhePerfil("Nome da Empresa", dados['nomeEmpresa'] ?? "SmartLog Online", Icons.business),
-                    const Divider(height: 24),
-                    _editandoPerfil
-                        ? TextFormField(
-                      controller: _razaoSocialCtrl,
-                      decoration: const InputDecoration(labelText: "Razão Social"),
-                    )
-                        : _linhaDetalhePerfil("Razão Social", dados['razaoSocial'] ?? "Não informada", Icons.badge),
-                    const Divider(height: 24),
-                    _editandoPerfil
-                        ? TextFormField(
-                      controller: _nomeFantasiaCtrl,
-                      decoration: const InputDecoration(labelText: "Nome Fantasia"),
-                    )
-                        : _linhaDetalhePerfil("Nome Fantasia", dados['nomeFantasia'] ?? "Não informado", Icons.store),
-                    const Divider(height: 24),
-                    _editandoPerfil
-                        ? TextFormField(
-                      controller: _cnpjCtrl,
-                      decoration: const InputDecoration(labelText: "CNPJ"),
-                    )
-                        : _linhaDetalhePerfil("CNPJ", dados['cnpj'] ?? "00.000.000/0001-00", Icons.pin),
-                    const Divider(height: 24),
-                    _editandoPerfil
-                        ? TextFormField(
-                      controller: _enderecoCtrl,
-                      decoration: const InputDecoration(labelText: "Endereço"),
-                    )
-                        : _linhaDetalhePerfil("Endereço", dados['endereco'] ?? "São Paulo - SP", Icons.location_on),
-                    const Divider(height: 24),
-                    _editandoPerfil
-                        ? TextFormField(
-                      controller: _telefoneCtrl,
-                      decoration: const InputDecoration(labelText: "Telefone"),
-                    )
-                        : _linhaDetalhePerfil("Telefone", dados['telefone'] ?? "(11) 99999-9999", Icons.phone),
-                    const Divider(height: 24),
-                    _editandoPerfil
-                        ? TextFormField(
-                      controller: _siteCtrl,
-                      decoration: const InputDecoration(labelText: "Site"),
-                    )
-                        : _linhaDetalhePerfil("Site", dados['site'] ?? "www.smartlog.com.br", Icons.language),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 32),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 
-  Widget _linhaDetalhePerfil(String titulo, String valor, IconData icone) {
-    return Row(
-      children: [
-        Icon(icone, size: 20, color: AppTheme.statusGrey),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(titulo, style: const TextStyle(fontSize: 12, color: AppTheme.statusGrey)),
-              const SizedBox(height: 2),
-              Text(valor, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.primaryDark)),
-            ],
+  // 6. PERFIL
+  Widget _buildAbaPerfil() {
+    return const Center(
+      key: ValueKey("PerfilView"),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircleAvatar(
+            radius: 45,
+            backgroundColor: AppTheme.primaryDark,
+            child: Icon(Icons.admin_panel_settings, color: AppTheme.accentOrange, size: 45),
           ),
-        ),
-      ],
+          SizedBox(height: 12),
+          Text(
+            "Administrador SmartLog",
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
+          ),
+          Text("admin@smartlog.com.br", style: TextStyle(color: AppTheme.statusGrey)),
+        ],
+      ),
     );
   }
 }
@@ -866,37 +521,23 @@ class _DashboardAdminState extends State<DashboardAdmin> {
 class _Card extends StatelessWidget {
   final String titulo;
   final String valor;
-  final IconData icone;
-  final Color cor;
+  final IconData icon;
+  final Color color;
 
-  const _Card(this.titulo, this.valor, this.icone, this.cor);
+  const _Card(this.titulo, this.valor, this.icon, this.color);
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Icon(icone, color: cor, size: 24),
-                Text(
-                  valor,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              titulo,
-              style: const TextStyle(fontSize: 12, color: AppTheme.statusGrey, fontWeight: FontWeight.w500),
-            ),
+            Icon(icon, color: color, size: 28),
+            Text(valor, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.primaryDark)),
+            Text(titulo, style: const TextStyle(color: AppTheme.statusGrey, fontSize: 12, fontWeight: FontWeight.w500)),
           ],
         ),
       ),
