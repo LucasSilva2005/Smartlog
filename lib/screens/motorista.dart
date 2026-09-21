@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 import '../theme/app_theme.dart';
 import 'chat_assistente.dart';
@@ -26,6 +28,48 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
     "Rotas por Região",
     "Perfil"
   ];
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // FUNÇÃO AUXILIAR: Atualiza o status buscando pelo código amigável (ex: ENT-9YKM)
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<void> _atualizarStatusPorCodigoAmigavel(BuildContext ctx, String codigoAmigavel, String novoStatus) async {
+    try {
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('entregas')
+          .where('Id', isEqualTo: codigoAmigavel)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        final docIdReal = querySnapshot.docs.first.id;
+
+        await FirebaseFirestore.instance
+            .collection('entregas')
+            .doc(docIdReal)
+            .update({'status': novoStatus});
+
+        if (ctx.mounted) {
+          Navigator.pop(ctx);
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(content: Text("Status atualizado para: $novoStatus")),
+          );
+        }
+      } else {
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(content: Text("Erro: Nenhuma entrega encontrada com o ID $codigoAmigavel")),
+          );
+        }
+      }
+    } catch (e) {
+      print("🚨 ERRO AO ALTERAR STATUS: $e");
+      if (ctx.mounted) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          SnackBar(content: Text("Erro ao alterar status: $e")),
+        );
+      }
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -109,83 +153,140 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
     }
   }
 
-  // 1. PAINEL / INÍCIO DO MOTORISTA
+  // 1. PAINEL / INÍCIO DO MOTORISTA (DINÂMICO)
   Widget _buildAbaPainel(String? motoristaUid) {
-    return SingleChildScrollView(
-      key: const ValueKey("PainelMotoristaView"),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Resumo do Dia",
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.primaryDark,
-            ),
-          ),
-          const SizedBox(height: 16),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.4,
-            children: [
-              _CardMetrica("Pendentes", "4", Icons.hourglass_empty, AppTheme.statusOrange),
-              _CardMetrica("Entregues", "12", Icons.check_circle_outline, AppTheme.statusGreen),
-              _CardMetrica("Distância", "45 km", Icons.speed, Colors.blue),
-              _CardMetrica("Eficiência", "98%", Icons.trending_up, Colors.purple),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
+    if (motoristaUid == null || motoristaUid.isEmpty) {
+      return const Center(child: Text("Usuário não autenticado."));
+    }
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance.collection('usuarios').doc(motoristaUid).get(),
+      builder: (context, userSnapshot) {
+        if (userSnapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
+          return const Center(child: Text("Perfil do motorista não encontrado."));
+        }
+
+        final userData = userSnapshot.data!.data() as Map<String, dynamic>;
+        final String? empresaId = userData['empresaId'];
+
+        if (empresaId == null) {
+          return const Center(child: Text("Empresa não vinculada."));
+        }
+
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('entregas')
+              .where('motoristaId', isEqualTo: motoristaUid)
+              .where('empresaId', isEqualTo: empresaId)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final docs = snapshot.hasData ? snapshot.data!.docs : [];
+
+            int totalPendentes = 0;
+            int totalEntregues = 0;
+
+            for (var doc in docs) {
+              final data = doc.data() as Map<String, dynamic>;
+              final status = (data['status'] ?? '').toString().trim().toLowerCase();
+
+              if (status == 'pendente') {
+                totalPendentes++;
+              } else if (status == 'entregue') {
+                totalEntregues++;
+              }
+            }
+
+            final int totalGeral = docs.length;
+            final double eficiencia = totalGeral > 0 ? (totalEntregues / totalGeral) * 100 : 0.0;
+            final double distanciaEstimada = totalEntregues * 3.5;
+
+            return SingleChildScrollView(
+              key: const ValueKey("PainelMotoristaView"),
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Status da Jornada",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _emViagem ? "Você está em rota ativa enviando localização." : "Você está em pausa / pronto para iniciar.",
-                    style: const TextStyle(color: AppTheme.statusGrey, fontSize: 13),
+                    "Resumo do Dia",
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primaryDark,
+                    ),
                   ),
                   const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _emViagem ? Colors.red : AppTheme.statusGreen,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 1.4,
+                    children: [
+                      _CardMetrica("Pendentes", "$totalPendentes", Icons.hourglass_empty, AppTheme.statusOrange),
+                      _CardMetrica("Entregues", "$totalEntregues", Icons.check_circle_outline, AppTheme.statusGreen),
+                      _CardMetrica("Distância", "${distanciaEstimada.toStringAsFixed(1)} km", Icons.speed, Colors.blue),
+                      _CardMetrica("Eficiência", "${eficiencia.toStringAsFixed(0)}%", Icons.trending_up, Colors.purple),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "Status da Jornada",
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _emViagem ? "Você está em rota ativa enviando localização." : "Você está em pausa / pronto para iniciar.",
+                            style: const TextStyle(color: AppTheme.statusGrey, fontSize: 13),
+                          ),
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _emViagem ? Colors.red : AppTheme.statusGreen,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              icon: Icon(_emViagem ? Icons.stop : Icons.play_arrow),
+                              label: Text(_emViagem ? "Encerrar Viagem / Rota" : "Iniciar Viagem / Rota"),
+                              onPressed: () {
+                                setState(() {
+                                  _emViagem = !_emViagem;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(_emViagem ? "Viagem iniciada com sucesso!" : "Viagem encerrada.")),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
-                      icon: Icon(_emViagem ? Icons.stop : Icons.play_arrow),
-                      label: Text(_emViagem ? "Encerrar Viagem / Rota" : "Iniciar Viagem / Rota"),
-                      onPressed: () {
-                        setState(() {
-                          _emViagem = !_emViagem;
-                        });
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(_emViagem ? "Viagem iniciada com sucesso!" : "Viagem encerrada.")),
-                        );
-                      },
                     ),
                   ),
                 ],
               ),
-            ),
-          ),
-        ],
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -247,6 +348,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                       itemBuilder: (context, index) {
                         final entrega = entregas[index].data() as Map<String, dynamic>;
                         final docId = entregas[index].id;
+                        final codigoAmigavel = entrega['Id'] ?? entrega['id'] ?? 'ENT';
                         final status = entrega['status'] ?? 'Pendente';
 
                         final Color statusColor = status == 'Entregue'
@@ -264,7 +366,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                               child: Icon(Icons.local_shipping, color: AppTheme.primaryDark),
                             ),
                             title: Text(
-                              "${entrega['id'] ?? 'ENT'} • ${entrega['cliente'] ?? 'Cliente'}",
+                              "$codigoAmigavel • ${entrega['cliente'] ?? 'Cliente'}",
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             subtitle: Text("${entrega['endereco'] ?? ''}\nRegião: ${entrega['regiao'] ?? 'Geral'}"),
@@ -295,13 +397,12 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
     );
   }
 
-  // 3. ROTAS UNIFICADAS POR REGIÃO + INTELIGÊNCIA ARTIFICIAL DE TRÁFEGO
+  // 3. ROTAS UNIFICADAS POR REGIÃO + MAPA COM MARCADORES E POLYLINES
   Widget _buildAbaRotasRegiao(String? motoristaUid) {
     if (motoristaUid == null || motoristaUid.isEmpty) {
       return const Center(child: Text("Usuário não autenticado."));
     }
 
-    // Variáveis de controle de estado local para simular a IA na aba (caso prefira modularizar)
     bool _otimizandoIA = false;
     String _statusTransitoIA = "Tráfego fluindo normalmente. Menor tempo estimado.";
 
@@ -313,7 +414,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Painel de Otimização por IA em Tempo Real
+              // Banner de Otimização por IA
               Container(
                 padding: const EdgeInsets.all(14),
                 margin: const EdgeInsets.only(bottom: 14),
@@ -353,7 +454,6 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                           _statusTransitoIA = "Analisando tráfego ponto a ponto...";
                         });
 
-                        // Simulação de processamento de tráfego em tempo real
                         await Future.delayed(const Duration(seconds: 2));
 
                         if (context.mounted) {
@@ -368,25 +468,126 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                       },
                       child: _otimizandoIA
                           ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
                           : const Text("Otimizar", style: TextStyle(fontSize: 12)),
                     ),
                   ],
                 ),
               ),
+
+              // MAPA DE RASTREAMENTO COM LINHA DE ROTA (POLYLINE)
               const Text(
-                "Rotas Unificadas por Região",
+                "Mapa de Paradas e Rota",
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
               ),
-              const SizedBox(height: 4),
-              const Text(
-                "Visualize os endereços agrupados por região para otimizar seu trajeto.",
-                style: TextStyle(fontSize: 13, color: AppTheme.statusGrey),
+              const SizedBox(height: 8),
+
+              SizedBox(
+                height: 200,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: FutureBuilder<DocumentSnapshot>(
+                    future: FirebaseFirestore.instance.collection('usuarios').doc(motoristaUid).get(),
+                    builder: (context, userSnap) {
+                      if (!userSnap.hasData || !userSnap.data!.exists) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final userData = userSnap.data!.data() as Map<String, dynamic>;
+                      final String? empresaId = userData['empresaId'];
+
+                      if (empresaId == null) {
+                        return const Center(child: Text("Empresa não vinculada."));
+                      }
+
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('entregas')
+                            .where('motoristaId', isEqualTo: motoristaUid)
+                            .where('empresaId', isEqualTo: empresaId)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          Set<Marker> marcadores = {};
+                          Set<Polyline> polylines = {};
+                          List<LatLng> pontosDaRota = [];
+                          LatLng posicaoInicial = const LatLng(-23.550520, -46.633308);
+
+                          if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+                            for (var doc in snapshot.data!.docs) {
+                              final data = doc.data() as Map<String, dynamic>;
+                              final double? lat = data['latitude'];
+                              final double? lng = data['longitude'];
+                              final String status = (data['status'] ?? 'Pendente').toString();
+                              final String cliente = data['cliente'] ?? 'Cliente';
+                              final String idAmigavel = data['Id'] ?? data['id'] ?? 'ENT';
+
+                              if (lat != null && lng != null) {
+                                final LatLng coordenadaPonto = LatLng(lat, lng);
+                                posicaoInicial = coordenadaPonto;
+                                pontosDaRota.add(coordenadaPonto);
+
+                                double hueCor = BitmapDescriptor.hueRed;
+                                if (status == 'Em Rota') {
+                                  hueCor = BitmapDescriptor.hueOrange;
+                                } else if (status == 'Entregue' || status == 'entregue') {
+                                  hueCor = BitmapDescriptor.hueGreen;
+                                }
+
+                                marcadores.add(
+                                  Marker(
+                                    markerId: MarkerId(doc.id),
+                                    position: coordenadaPonto,
+                                    icon: BitmapDescriptor.defaultMarkerWithHue(hueCor),
+                                    infoWindow: InfoWindow(
+                                      title: "$idAmigavel - $cliente",
+                                      snippet: "Status: $status",
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+
+                            // Adiciona a linha conectando as paradas, caso haja mais de um ponto
+                            if (pontosDaRota.length > 1) {
+                              polylines.add(
+                                Polyline(
+                                  polylineId: const PolylineId('rota_motorista'),
+                                  points: pontosDaRota,
+                                  color: AppTheme.accentOrange,
+                                  width: 4,
+                                ),
+                              );
+                            }
+                          }
+
+                          return GoogleMap(
+                            initialCameraPosition: CameraPosition(
+                              target: posicaoInicial,
+                              zoom: 13,
+                            ),
+                            markers: marcadores,
+                            polylines: polylines,
+                            myLocationEnabled: true,
+                            myLocationButtonEnabled: true,
+                            zoomControlsEnabled: false,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
               ),
-              const SizedBox(height: 12),
+
+              const SizedBox(height: 14),
+              const Text(
+                "Rotas Unificadas por Região",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
+              ),
+              const SizedBox(height: 8),
+
+              // LISTA DE REGIÕES ABAIXO DO MAPA
               Expanded(
                 child: FutureBuilder<DocumentSnapshot>(
                   future: FirebaseFirestore.instance.collection('usuarios').doc(motoristaUid).get(),
@@ -406,7 +607,6 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                       return const Center(child: Text("Empresa não vinculada."));
                     }
 
-                    // Busca as entregas atribuídas a este motorista para unificar por região
                     return StreamBuilder<QuerySnapshot>(
                       stream: FirebaseFirestore.instance
                           .collection('entregas')
@@ -423,8 +623,6 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                         }
 
                         final docs = snapshot.data!.docs;
-
-                        // Agrupando dinamicamente por região
                         final Map<String, List<Map<String, dynamic>>> entregasPorRegiao = {};
 
                         for (var doc in docs) {
@@ -435,7 +633,7 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                             entregasPorRegiao[regiao] = [];
                           }
                           entregasPorRegiao[regiao]!.add({
-                            'id': doc.id,
+                            'idReal': doc.id,
                             ...data,
                           });
                         }
@@ -463,19 +661,20 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                                   regiao,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
-                                    fontSize: 16,
+                                    fontSize: 15,
                                     color: AppTheme.primaryDark,
                                   ),
                                 ),
                                 subtitle: Text(
                                   "${listaEntregas.length} ${listaEntregas.length == 1 ? 'parada unificada' : 'paradas unificadas'}",
-                                  style: const TextStyle(fontSize: 13, color: AppTheme.statusGrey),
+                                  style: const TextStyle(fontSize: 12, color: AppTheme.statusGrey),
                                 ),
                                 children: listaEntregas.map((entrega) {
+                                  final codigoAmigavel = entrega['Id'] ?? entrega['id'] ?? 'ENT';
                                   final status = entrega['status'] ?? 'Pendente';
 
                                   return Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                                     decoration: BoxDecoration(
                                       border: Border(
                                         top: BorderSide(color: Colors.grey.shade200),
@@ -484,17 +683,17 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
                                     child: ListTile(
                                       contentPadding: EdgeInsets.zero,
                                       title: Text(
-                                        "${entrega['id'] ?? 'ENT'} • ${entrega['cliente'] ?? 'Cliente'}",
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                        "$codigoAmigavel • ${entrega['cliente'] ?? 'Cliente'}",
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                       ),
                                       subtitle: Text(
                                         "${entrega['endereco'] ?? 'Endereço não informado'}\nStatus: $status",
-                                        style: const TextStyle(fontSize: 12),
+                                        style: const TextStyle(fontSize: 11),
                                       ),
                                       isThreeLine: true,
                                       trailing: const Icon(Icons.chevron_right, size: 20),
                                       onTap: () {
-                                        _modalDetalhesEntregaMotorista(context, entrega['id'], entrega);
+                                        _modalDetalhesEntregaMotorista(context, entrega['idReal'], entrega);
                                       },
                                     ),
                                   );
@@ -512,199 +711,6 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
           ),
         );
       },
-    );
-  }
-
-  // Widget do Mapa com a Rota Otimizada e Traçado (Polyline)
-  Widget _buildMapaComRotaOtimizada(LatLng posicaoMotorista, List<Map<String, dynamic>> paradas) {
-    // Cria os pontos para desenhar a linha da rota no mapa
-    List<LatLng> pontosRota = paradas.map((parada) {
-      // Certifique-se de que sua entrega possui latitude e longitude salvas no Firestore
-      double lat = parada['latitude'] ?? posicaoMotorista.latitude;
-      double lng = parada['longitude'] ?? posicaoMotorista.longitude;
-      return LatLng(lat, lng);
-    }).toList();
-
-    // Adiciona a posição inicial do motorista no topo da lista se necessário
-    if (pontosRota.isNotEmpty) {
-      pontosRota.insert(0, posicaoMotorista);
-    }
-
-    Set<Marker> marcadores = {};
-    Set<Polyline> polylines = {};
-
-    // Adiciona o marcador do motorista
-    marcadores.add(
-      Marker(
-        markerId: const MarkerId('motorista_atual'),
-        position: posicaoMotorista,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-        infoWindow: const InfoWindow(title: 'Sua Posição (SmartLog AI)'),
-      ),
-    );
-
-    // Adiciona os marcadores de cada parada otimizada
-    for (int i = 0; i < paradas.length; i++) {
-      var p = paradas[i];
-      double lat = p['latitude'] ?? posicaoMotorista.latitude;
-      double lng = p['longitude'] ?? posicaoMotorista.longitude;
-
-      marcadores.add(
-        Marker(
-          markerId: MarkerId('parada_$i'),
-          position: LatLng(lat, lng),
-          infoWindow: InfoWindow(
-            title: '${i + 1}. ${p['cliente'] ?? 'Parada'}',
-            snippet: p['endereco'] ?? '',
-          ),
-        ),
-      );
-    }
-
-    // Desenha a linha (Polyline) conectando as paradas otimizadas
-    if (pontosRota.length > 1) {
-      polylines.add(
-        Polyline(
-          polylineId: const PolylineId('rota_otimizada_ia'),
-          points: pontosRota,
-          color: AppTheme.accentOrange,
-          width: 5,
-        ),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: GoogleMap(
-        initialCameraPosition: CameraPosition(
-          target: posicaoMotorista,
-          zoom: 14,
-        ),
-        markers: marcadores,
-        polylines: polylines,
-        myLocationEnabled: true,
-        myLocationButtonEnabled: true,
-      ),
-    );
-  }
-
-  // Modal de Detalhes da Entrega para o Motorista
-  void _modalDetalhesEntregaMotorista(BuildContext context, String docId, Map<String, dynamic> entrega) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        final statusAtual = entrega['status'] ?? 'Pendente';
-
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-            top: 24,
-            left: 20,
-            right: 20,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      "Detalhes: ${entrega['id'] ?? 'ENT'}",
-                      style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primaryDark
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
-                ),
-                const Divider(),
-                const SizedBox(height: 8),
-
-                _itemDetalheInfo(Icons.person, "Cliente", entrega['cliente'] ?? 'Não informado'),
-                _itemDetalheInfo(Icons.location_on, "Endereço", entrega['endereco'] ?? 'Não informado'),
-                _itemDetalheInfo(Icons.map, "Região", entrega['regiao'] ?? 'Geral'),
-                _itemDetalheInfo(Icons.calendar_today, "Data Agendada", entrega['data'] ?? 'Não informada'),
-                _itemDetalheInfo(Icons.info_outline, "Status Atual", statusAtual),
-
-                const SizedBox(height: 20),
-                const Text(
-                  "Atualizar Status da Entrega:",
-                  style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
-                ),
-                const SizedBox(height: 10),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _botaoAlterarStatus(ctx, docId, 'Pendente', statusAtual, Colors.grey),
-                    _botaoAlterarStatus(ctx, docId, 'Em Rota', statusAtual, AppTheme.statusOrange),
-                    _botaoAlterarStatus(ctx, docId, 'Entregue', statusAtual, AppTheme.statusGreen),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _itemDetalheInfo(IconData icone, String titulo, String valor) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icone, size: 20, color: AppTheme.primaryDark),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(titulo, style: const TextStyle(fontSize: 12, color: AppTheme.statusGrey)),
-                const SizedBox(height: 2),
-                Text(valor, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _botaoAlterarStatus(BuildContext context, String docId, String novoStatus, String statusAtual, Color cor) {
-    final bool selecionado = statusAtual == novoStatus;
-
-    return ElevatedButton(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: selecionado ? cor : Colors.grey.shade200,
-        foregroundColor: selecionado ? Colors.white : Colors.black87,
-        elevation: selecionado ? 2 : 0,
-      ),
-      onPressed: () async {
-        await FirebaseFirestore.instance.collection('entregas').doc(docId).update({
-          'status': novoStatus,
-        });
-        if (context.mounted) {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Status alterado para: $novoStatus")),
-          );
-        }
-      },
-      child: Text(novoStatus),
     );
   }
 
@@ -894,6 +900,186 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
           ),
         );
       },
+    );
+  }
+
+  // Modal de Detalhes da Entrega para o Motorista
+  void _modalDetalhesEntregaMotorista(BuildContext context, String docId, Map<String, dynamic> entrega) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final statusAtual = entrega['status'] ?? 'Pendente';
+        final emailCliente = entrega['emailCliente'] ?? entrega['email'] ?? 'Não informado';
+        final codigoAmigavel = entrega['Id'] ?? entrega['id'] ?? 'ENT';
+
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            top: 24,
+            left: 20,
+            right: 20,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "Detalhes: $codigoAmigavel",
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primaryDark
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const Divider(),
+                const SizedBox(height: 8),
+
+                _itemDetalheInfo(Icons.person, "Cliente", entrega['cliente'] ?? 'Não informado'),
+                _itemDetalheInfo(Icons.email, "E-mail do Cliente", emailCliente),
+                _itemDetalheInfo(Icons.location_on, "Endereço", entrega['endereco'] ?? 'Não informado'),
+                _itemDetalheInfo(Icons.map, "Região", entrega['regiao'] ?? 'Geral'),
+                _itemDetalheInfo(Icons.calendar_today, "Data Agendada", entrega['data'] ?? 'Não informada'),
+                _itemDetalheInfo(Icons.info_outline, "Status Atual", statusAtual),
+
+                const SizedBox(height: 20),
+                const Text(
+                  "Atualizar Status da Entrega:",
+                  style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
+                ),
+                const SizedBox(height: 10),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _botaoAlterarStatus(ctx, docId, 'Pendente', statusAtual, Colors.grey, entrega),
+                    _botaoAlterarStatus(ctx, docId, 'Em Rota', statusAtual, AppTheme.statusOrange, entrega),
+                    _botaoAlterarStatus(ctx, docId, 'Entregue', statusAtual, AppTheme.statusGreen, entrega),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Função auxiliar para alterar o status e disparar o e-mail de rastreio
+  Widget _botaoAlterarStatus(
+      BuildContext ctx, String docId, String novoStatus, String statusAtual, Color cor, Map<String, dynamic> entrega) {
+
+    final bool isSelecionado = (statusAtual == novoStatus);
+
+    return ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelecionado ? cor : cor.withOpacity(0.2),
+        foregroundColor: isSelecionado ? Colors.white : cor,
+        elevation: isSelecionado ? 2 : 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      onPressed: () async {
+        try {
+          // 1. Atualiza o status no Firestore usando o ID do documento
+          await FirebaseFirestore.instance
+              .collection('entregas')
+              .doc(docId)
+              .update({'status': novoStatus});
+
+          // 2. Se mudou para "Em Rota", envia o e-mail de rastreio direto pelo app
+          if (novoStatus == 'Em Rota') {
+            final emailCliente = entrega['emailCliente'] ?? entrega['email'];
+            final nomeCliente = entrega['cliente'] ?? 'Cliente';
+            final idEntrega = entrega['Id'] ?? entrega['id'] ?? docId;
+
+            if (emailCliente != null && emailCliente.toString().isNotEmpty) {
+              final linkRastreio = "https://seuapp.com/rastreio?id=$docId";
+
+              // Requisição HTTP direta para o EmailJS
+              final url = Uri.parse('https://api.emailjs.com/api/v1.0/email/send');
+              final response = await http.post(
+                url,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'service_id': 'service_n0xgdgw',
+                  'template_id': 'template_dzr5h0r',
+                  'user_id': 'SQbay_KhicBk4ORAp',
+                  'accessToken': 'kBi4jmhgoY-yhyoQvRRWW',
+                  'template_params': {
+                    'to_email': emailCliente,
+                    'email': emailCliente, // Garante compatibilidade com o template
+                    'to_name': nomeCliente,
+                    'id_entrega': idEntrega,
+                    'tracking_link': linkRastreio,
+                  }
+                }),
+              );
+
+              // Validação detalhada do retorno do EmailJS no log
+              if (response.statusCode == 200) {
+                print("E-mail disparado e aceito pelo EmailJS com sucesso!");
+              } else {
+                print("FALHA RETORNADA PELO EMAILJS: ${response.statusCode} - ${response.body}");
+              }
+            }
+          }
+
+          if (ctx.mounted) {
+            Navigator.pop(ctx);
+            ScaffoldMessenger.of(ctx).showSnackBar(
+              SnackBar(content: Text("Status atualizado para: $novoStatus")),
+            );
+          }
+        } catch (e) {
+          print("ERRO DETALHADO AO ALTERAR STATUS: $e");
+          if (ctx.mounted) {
+            ScaffoldMessenger.of(ctx).showSnackBar(
+              SnackBar(content: Text("Erro ao atualizar: $e")),
+            );
+          }
+        }
+      },
+      child: Text(
+        novoStatus,
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+      ),
+    );
+  }
+
+  Widget _itemDetalheInfo(IconData icone, String titulo, String valor) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icone, size: 20, color: AppTheme.primaryDark),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(titulo, style: const TextStyle(fontSize: 12, color: AppTheme.statusGrey)),
+                const SizedBox(height: 2),
+                Text(valor, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

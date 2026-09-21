@@ -6,8 +6,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 
 import '../controllers/dashboard_controller.dart';
 import '../services/chat_service.dart';
@@ -348,6 +346,9 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                 final status = entrega['status'] ?? 'Pendente';
                 final motoristaNome = entrega['motoristaNome'] ?? entrega['motorista'] ?? 'Não atribuído';
 
+                // Pegando o e-mail do cliente salvo na entrega (se houver)
+                final emailCliente = entrega['emailCliente'] ?? entrega['email'] ?? 'Sem e-mail cadastrado';
+
                 final Color statusColor = status == 'Entregue'
                     ? AppTheme.statusGreen
                     : status == 'Em Rota'
@@ -369,8 +370,9 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                       "${entrega['id'] ?? 'ENT'} • ${entrega['cliente'] ?? 'Cliente'}",
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
+                    // Adicionado o e-mail do cliente logo abaixo do endereço
                     subtitle: Text(
-                        "${entrega['endereco'] ?? ''}\nRegião: ${entrega['regiao']} | Motorista: $motoristaNome"),
+                        "${entrega['endereco'] ?? ''}\nE-mail: $emailCliente\nRegião: ${entrega['regiao']} | Motorista: $motoristaNome"),
                     isThreeLine: true,
                     trailing: Container(
                       padding: const EdgeInsets.symmetric(
@@ -495,6 +497,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
   void _modalCadastroEntrega(
       BuildContext context, DashboardController controller) {
     final clienteCtrl = TextEditingController();
+    final emailCtrl = TextEditingController(); // <- Controlador para o e-mail do cliente
     final enderecoCtrl = TextEditingController();
     final dataCtrl = TextEditingController(text: "2026-09-22");
     String zonaSelecionadaModal = "Sul";
@@ -535,6 +538,16 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                       controller: clienteCtrl,
                       decoration: const InputDecoration(
                           labelText: "Nome do Cliente",
+                          border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 12),
+                    // <- Novo campo de E-mail do Cliente inserido aqui
+                    TextField(
+                      controller: emailCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                          labelText: "E-mail do Cliente (Para rastreio)",
+                          hintText: "cliente@email.com",
                           border: OutlineInputBorder()),
                     ),
                     const SizedBox(height: 12),
@@ -647,20 +660,45 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                               );
 
                               final nomeMotoristaFinal =
-                                  motoristaSelecionadoObj['nome'] ?? 'Não atribuído';
+                                  motoristaSelecionadoObj['nome'] ??
+                                      'Não atribuído';
                               final idMotoristaFinal =
                                   motoristaSelecionadoObj['id'] ?? '';
 
+                              final nomeCliente = clienteCtrl.text.trim();
+                              final emailCliente = emailCtrl.text.trim();
+                              final empresaId = controller.empresaId!;
+
+                              // 1. Verificar se o cliente já existe na coleção 'clientes' da empresa
+                              final clienteQuery = await FirebaseFirestore.instance
+                                  .collection('clientes')
+                                  .where('empresaId', isEqualTo: empresaId)
+                                  .where('nome', isEqualTo: nomeCliente)
+                                  .get();
+
+                              if (clienteQuery.docs.isEmpty) {
+                                // Se não existe, cadastra automaticamente na coleção 'clientes'
+                                await FirebaseFirestore.instance.collection('clientes').add({
+                                  'empresaId': empresaId,
+                                  'nome': nomeCliente,
+                                  'email': emailCliente.isNotEmpty ? emailCliente : 'E-mail não informado',
+                                  'endereco': enderecoCtrl.text.trim(),
+                                  'criadoEm': FieldValue.serverTimestamp(),
+                                });
+                              }
+
+                              // 2. Salva a entrega normalmente
                               final docRef = await FirebaseFirestore.instance
                                   .collection('entregas')
                                   .add({
-                                'empresaId': controller.empresaId,
-                                'cliente': clienteCtrl.text.trim(),
+                                'empresaId': empresaId,
+                                'cliente': nomeCliente,
+                                'emailCliente': emailCliente,
                                 'endereco': enderecoCtrl.text.trim(),
                                 'data': dataCtrl.text.trim(),
                                 'regiao': zonaSelecionadaModal,
                                 'motorista': nomeMotoristaFinal,
-                                'motoristaId': idMotoristaFinal, // Salva o UID do motorista para o app filtrar
+                                'motoristaId': idMotoristaFinal,
                                 'status': 'Pendente',
                               });
 
@@ -668,6 +706,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                                   "ENT-${docRef.id.substring(0, 4).toUpperCase()}";
                               await docRef.update({'id': idCurto});
 
+                              // 3. Atualiza os dados no controller para refletir nas telas
                               await controller.carregarEntregas();
                             }
                             if (modalContext.mounted) {
@@ -690,24 +729,6 @@ class _DashboardAdminState extends State<DashboardAdmin> {
 
   // 3. ROTAS
   Widget _buildAbaRotas(DashboardController controller) {
-    List rotasParaExibir = List.from(controller.rotas);
-
-    // Força a inserção da rota mockada para teste imediato
-    final motoristaNome = controller.motoristas.isNotEmpty
-        ? (controller.motoristas.first['nome'] ?? 'Motorista')
-        : 'Motorista Teste';
-
-    // Adiciona a rota mockada no topo da lista para garantir que apareça
-    rotasParaExibir.insert(0, {
-      'id': 'rota_mock_demo',
-      'nome': 'Rota Demonstração - Zona Sul',
-      'motoristaId': 'motorista_mock_id',
-      'motoristaNome': motoristaNome,
-      'regiao': 'Sul',
-      'status': 'Em Andamento',
-      'totalEnderecos': 3,
-    });
-
     return Padding(
       key: const ValueKey("RotasView"),
       padding: const EdgeInsets.all(16),
@@ -823,12 +844,12 @@ class _DashboardAdminState extends State<DashboardAdmin> {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: rotasParaExibir.isEmpty
+            child: controller.rotas.isEmpty
                 ? const Center(child: Text("Nenhuma rota gerada no momento."))
                 : ListView.builder(
-              itemCount: rotasParaExibir.length,
+              itemCount: controller.rotas.length,
               itemBuilder: (context, index) {
-                final rota = rotasParaExibir[index];
+                final rota = controller.rotas[index];
                 final status = rota['status'] ?? 'Pendente';
                 final total = rota['totalEnderecos'] ??
                     (rota['enderecos'] as List?)?.length ??
@@ -892,22 +913,6 @@ class _DashboardAdminState extends State<DashboardAdmin> {
 
   void _abrirModalMapaAoVivo(
       BuildContext context, String rotaId, String nomeRota) {
-
-    final bool isMock = (rotaId == 'rota_mock_demo');
-
-    // Pontos detalhados para simular o trajeto real pelas ruas (adeus voo de avião! 🚗)
-    final List<LatLng> pontosMockados = [
-      const LatLng(-23.550520, -46.633308), // Parada 1: Praça da Sé
-      const LatLng(-23.552000, -46.636000), // Curva / Esquina
-      const LatLng(-23.554500, -46.641000), // Curva / Esquina
-      const LatLng(-23.557000, -46.648000), // Curva / Esquina
-      const LatLng(-23.561414, -46.656456), // Parada 2: Av. Paulista
-      const LatLng(-23.564000, -46.652000), // Curva / Esquina
-      const LatLng(-23.567000, -46.647000), // Curva / Esquina
-      const LatLng(-23.570000, -46.644000), // Curva / Esquina
-      const LatLng(-23.573211, -46.641654), // Parada 3: Parque Ibirapuera
-    ];
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -940,73 +945,14 @@ class _DashboardAdminState extends State<DashboardAdmin> {
               const Divider(),
               const SizedBox(height: 8),
               Expanded(
-                child: isMock
-                    ? ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: GoogleMap(
-                    initialCameraPosition: CameraPosition(
-                      target: pontosMockados[0],
-                      zoom: 14,
-                    ),
-                    scrollGesturesEnabled: true,
-                    zoomGesturesEnabled: true,
-                    rotateGesturesEnabled: true,
-                    tiltGesturesEnabled: true,
-                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                      Factory<OneSequenceGestureRecognizer>(
-                            () => EagerGestureRecognizer(),
-                      ),
-                    },
-                    markers: {
-                      Marker(
-                        markerId: const MarkerId('parada_1'),
-                        position: pontosMockados[0], // Início (Sé)
-                        infoWindow: const InfoWindow(
-                          title: '1ª Parada (Demonstração)',
-                          snippet: 'Ponto de Partida',
-                        ),
-                        icon: BitmapDescriptor.defaultMarkerWithHue(
-                            BitmapDescriptor.hueGreen),
-                      ),
-                      Marker(
-                        markerId: const MarkerId('parada_2'),
-                        position: pontosMockados[4], // Meio (Paulista)
-                        infoWindow: const InfoWindow(
-                          title: '2ª Parada (Demonstração)',
-                          snippet: 'Endereço intermediário',
-                        ),
-                      ),
-                      Marker(
-                        markerId: const MarkerId('parada_3'),
-                        position: pontosMockados[8], // Fim (Ibirapuera)
-                        infoWindow: const InfoWindow(
-                          title: '3ª Parada (Demonstração)',
-                          snippet: 'Destino final',
-                        ),
-                        icon: BitmapDescriptor.defaultMarkerWithHue(
-                            BitmapDescriptor.hueRed),
-                      ),
-                    },
-                    polylines: {
-                      Polyline(
-                        polylineId: const PolylineId('trajeto_mock_demo'),
-                        points: pontosMockados,
-                        color: AppTheme.accentOrange,
-                        width: 5,
-                      ),
-                    },
-                  ),
-                )
-                    : StreamBuilder<DocumentSnapshot>(
+                child: StreamBuilder<DocumentSnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('rotas')
                       .doc(rotaId)
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState ==
-                        ConnectionState.waiting) {
-                      return const Center(
-                          child: CircularProgressIndicator());
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
                     }
 
                     if (!snapshot.hasData || !snapshot.data!.exists) {
@@ -1015,8 +961,7 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                               "Dados da rota não encontrados no Firestore."));
                     }
 
-                    var data =
-                    snapshot.data!.data() as Map<String, dynamic>?;
+                    var data = snapshot.data!.data() as Map<String, dynamic>?;
                     var loc = data?['localizacaoAtual'];
 
                     if (loc == null) {
@@ -1040,13 +985,6 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                           target: posicaoMotorista,
                           zoom: 16,
                         ),
-                        scrollGesturesEnabled: true,
-                        zoomGesturesEnabled: true,
-                        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                          Factory<OneSequenceGestureRecognizer>(
-                                () => EagerGestureRecognizer(),
-                          ),
-                        },
                         markers: {
                           Marker(
                             markerId: const MarkerId('motorista_ativo'),

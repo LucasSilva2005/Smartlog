@@ -60,7 +60,7 @@ class DashboardController extends ChangeNotifier {
         carregarMotoristas(),
         carregarClientes(),
         carregarRotas(),
-        carregarPerfilEmpresa(idEmpresa), // Carrega os dados do perfil/empresa ao iniciar
+        carregarPerfilEmpresa(idEmpresa),
       ]);
     } catch (e) {
       _erro = e.toString();
@@ -140,6 +140,93 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  // --- MÉTODO DE CADASTRO DE ENTREGA COM SINCRONIZAÇÃO AUTOMÁTICA DE CLIENTE ---
+  Future<bool> cadastrarEntregaESincronizarCliente({
+    required String clienteNome,
+    required String clienteEmail,
+    required String clienteTelefone,
+    required String endereco,
+    required String regiao,
+    String? motoristaId,
+    String? dataAgendada,
+  }) async {
+    try {
+      if (empresaId == null) {
+        debugPrint("ERRO: empresaId nulo ao cadastrar entrega.");
+        return false;
+      }
+
+      // 1. Gerar chave única para o documento do cliente na coleção 'usuarios'
+      final clienteIdKey = clienteEmail.trim().isNotEmpty
+          ? clienteEmail.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')
+          : clienteNome.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+
+      final clienteRef = _firestore.collection('usuarios').doc(clienteIdKey);
+      final clienteSnapshot = await clienteRef.get();
+
+      // 2. Cria ou atualiza o cliente na coleção 'usuarios'
+      if (!clienteSnapshot.exists) {
+        final novoClienteData = {
+          'id': clienteIdKey,
+          'empresaId': empresaId,
+          'nome': clienteNome,
+          'email': clienteEmail,
+          'telefone': clienteTelefone,
+          'enderecoPrincipal': endereco,
+          'tipo': 'CLIENTE',
+          'tipoUsuario': 'CLIENTE',
+          'criadoEm': FieldValue.serverTimestamp(),
+        };
+
+        await clienteRef.set(novoClienteData);
+
+        // Atualiza a lista local em memória
+        _clientes.add({
+          'id': clienteIdKey,
+          ...novoClienteData,
+        });
+      } else {
+        // Atualiza os dados de contato do cliente existente
+        await clienteRef.update({
+          'enderecoPrincipal': endereco,
+          if (clienteTelefone.isNotEmpty) 'telefone': clienteTelefone,
+        });
+      }
+
+      // 3. Cadastra a entrega vinculada ao cliente
+      final novaEntregaData = {
+        'empresaId': empresaId,
+        'cliente': clienteNome,
+        'emailCliente': clienteEmail,
+        'clienteId': clienteIdKey,
+        'telefoneCliente': clienteTelefone,
+        'endereco': endereco,
+        'regiao': regiao,
+        'status': 'Pendente',
+        'motoristaId': motoristaId ?? '',
+        'data': dataAgendada ?? '',
+        'criadoEm': FieldValue.serverTimestamp(),
+      };
+
+      final docRef = await _firestore.collection('entregas').add(novaEntregaData);
+
+      // Adiciona na lista local de entregas
+      _entregas.add({
+        'id': docRef.id,
+        ...novaEntregaData,
+      });
+
+      if (!_descartado) notifyListeners();
+      debugPrint("Entrega cadastrada e cliente sincronizado com sucesso!");
+      return true;
+    } catch (e) {
+      _erro = e.toString();
+      debugPrint("ERRO ao cadastrar entrega e sincronizar cliente: $e");
+      if (!_descartado) notifyListeners();
+      return false;
+    }
+  }
+
   // --- CARREGAR PERFIL E DADOS DA EMPRESA ---
   Future<void> carregarPerfilEmpresa(String idEmpresa) async {
     try {
@@ -161,7 +248,6 @@ class DashboardController extends ChangeNotifier {
     try {
       if (empresaId.isEmpty) return;
 
-      // Atualiza ou cria o documento da empresa no Firestore (Set com merge para não sobrescrever campos vazios se houverem)
       await _firestore.collection('empresas').doc(empresaId).set(novosDados, SetOptions(merge: true));
 
       _dadosEmpresa = novosDados;
@@ -222,6 +308,7 @@ class DashboardController extends ChangeNotifier {
         'email': email,
         'regiaoDesignada': regiao,
         'tipo': 'MOTORISTA',
+        'tipoUsuario': 'MOTORISTA',
         'status': 'Ativo',
         if (empresaId != null) 'empresaId': empresaId,
         'criadoEm': FieldValue.serverTimestamp(),
@@ -265,8 +352,6 @@ class DashboardController extends ChangeNotifier {
           .where('empresaId', isEqualTo: empresaId)
           .get();
 
-      debugPrint("Total de documentos brutos encontrados na coleção 'entregas': ${snapshot.docs.length}");
-
       final entregasFiltradas = snapshot.docs.where((doc) {
         final data = doc.data();
         final statusDoc = (data['status'] ?? '').toString().trim().toLowerCase();
@@ -277,8 +362,6 @@ class DashboardController extends ChangeNotifier {
 
         return ehPendente && mesmaRegiao;
       }).toList();
-
-      debugPrint("Entregas filtradas com sucesso (Pendente + Região '$regiao'): ${entregasFiltradas.length}");
 
       if (entregasFiltradas.isEmpty) return false;
 
