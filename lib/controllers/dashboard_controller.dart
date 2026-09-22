@@ -5,6 +5,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
+/// Código amigável da entrega, exibido ao usuário e lido pelo scanner de QR.
+///
+/// Derivado do ID do documento para nunca colidir. Único ponto que gera esse
+/// formato — o assistente de IA cita a entrega por ele, então divergência
+/// entre telas fazia o chat responder "sem código".
+String codigoEntrega(String docId) {
+  final base = docId.length >= 4 ? docId.substring(0, 4) : docId;
+  return 'ENT-${base.toUpperCase()}';
+}
+
 class DashboardController extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -83,7 +93,18 @@ class DashboardController extends ChangeNotifier {
           .where('empresaId', isEqualTo: empresaId)
           .get();
 
-      _entregas = snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+      // 'id' é sempre o código amigável (ENT-XXXX). Entregas antigas não têm
+      // esse campo gravado, então ele é derivado do ID do documento — a
+      // mesma regra que o Worker do assistente aplica, para o código citado
+      // no chat bater com o que aparece na tela.
+      // 'docId' guarda o ID real, necessário para escrever no Firestore.
+      _entregas = snapshot.docs
+          .map((doc) => {
+                'id': codigoEntrega(doc.id),
+                ...doc.data(),
+                'docId': doc.id,
+              })
+          .toList();
       debugPrint("DEBUG: Carregadas ${_entregas.length} entregas para a empresa $empresaId.");
 
       if (!_descartado) notifyListeners();
@@ -96,13 +117,22 @@ class DashboardController extends ChangeNotifier {
   Future<void> carregarMotoristas() async {
     try {
       if (empresaId == null) return;
+      // Uma consulta só, filtrando o tipo em memória. O cadastro por
+      // convite (auth_service) grava apenas 'tipoUsuario', enquanto
+      // cadastrarNovoMotorista grava 'tipo' e 'tipoUsuario' — filtrar por
+      // 'tipo' no Firestore escondia da lista todo motorista convidado,
+      // e o admin não conseguia atribuir entregas a ele.
       final snapshot = await _firestore
           .collection('usuarios')
           .where('empresaId', isEqualTo: empresaId)
-          .where('tipo', isEqualTo: 'MOTORISTA')
           .get();
 
-      _motoristas = snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+      _motoristas = snapshot.docs
+          .map((doc) => {'id': doc.id, ...doc.data()})
+          .where((u) =>
+              (u['tipoUsuario'] ?? u['tipo'] ?? '').toString().toUpperCase() ==
+              'MOTORISTA')
+          .toList();
       if (!_descartado) notifyListeners();
     } catch (e) {
       _erro = e.toString();
@@ -112,13 +142,19 @@ class DashboardController extends ChangeNotifier {
   Future<void> carregarClientes() async {
     try {
       if (empresaId == null) return;
+      // Mesmo motivo de carregarMotoristas: 'tipo' só existe em parte dos
+      // cadastros, então o filtro é feito em memória sobre os dois campos.
       final snapshot = await _firestore
           .collection('usuarios')
           .where('empresaId', isEqualTo: empresaId)
-          .where('tipo', isEqualTo: 'CLIENTE')
           .get();
 
-      _clientes = snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+      _clientes = snapshot.docs
+          .map((doc) => {'id': doc.id, ...doc.data()})
+          .where((u) =>
+              (u['tipoUsuario'] ?? u['tipo'] ?? '').toString().toUpperCase() ==
+              'CLIENTE')
+          .toList();
       if (!_descartado) notifyListeners();
     } catch (e) {
       _erro = e.toString();
@@ -194,6 +230,18 @@ class DashboardController extends ChangeNotifier {
       }
 
       // 3. Cadastra a entrega vinculada ao cliente
+      //
+      // Nome do motorista além do ID: o assistente de IA e a lista do admin
+      // exibem o nome, e buscá-lo em 'usuarios' a cada leitura sairia caro.
+      String motoristaNome = '';
+      if (motoristaId != null && motoristaId.isNotEmpty) {
+        final m = _motoristas.firstWhere(
+          (x) => x['id'] == motoristaId,
+          orElse: () => <String, dynamic>{},
+        );
+        motoristaNome = (m['nome'] ?? '').toString();
+      }
+
       final novaEntregaData = {
         'empresaId': empresaId,
         'cliente': clienteNome,
@@ -203,6 +251,7 @@ class DashboardController extends ChangeNotifier {
         'endereco': endereco,
         'regiao': regiao,
         'status': 'Pendente',
+        'motorista': motoristaNome,
         'motoristaId': motoristaId ?? '',
         'data': dataAgendada ?? '',
         'criadoEm': FieldValue.serverTimestamp(),
@@ -210,10 +259,15 @@ class DashboardController extends ChangeNotifier {
 
       final docRef = await _firestore.collection('entregas').add(novaEntregaData);
 
+      // O código só pode ser gerado depois que o Firestore atribui o ID.
+      final codigo = codigoEntrega(docRef.id);
+      await docRef.update({'id': codigo});
+
       // Adiciona na lista local de entregas
       _entregas.add({
-        'id': docRef.id,
         ...novaEntregaData,
+        'id': codigo,
+        'docId': docRef.id,
       });
 
       if (!_descartado) notifyListeners();
@@ -365,7 +419,9 @@ class DashboardController extends ChangeNotifier {
 
       if (entregasFiltradas.isEmpty) return false;
 
-      List<Map<String, dynamic>> listaEnderecos = entregasFiltradas.take(5).map((doc) {
+      final paradas = entregasFiltradas.take(5).toList();
+
+      List<Map<String, dynamic>> listaEnderecos = paradas.map((doc) {
         final data = doc.data();
         return {
           'entregaId': doc.id,
@@ -387,7 +443,23 @@ class DashboardController extends ChangeNotifier {
       };
 
       await _firestore.collection('rotas').add(novaRotaData);
+
+      // Carimba a atribuição nas próprias entregas. A coleção 'rotas' não é
+      // lida pelo painel do motorista nem pelo assistente de IA: sem estes
+      // campos, o motorista abre o app numa rota vazia e o assistente
+      // responde que não há nada atribuído a ele.
+      final lote = _firestore.batch();
+      for (var i = 0; i < paradas.length; i++) {
+        lote.update(paradas[i].reference, {
+          'motoristaId': motoristaId,
+          'motorista': motoristaNome,
+          'ordemEntrega': i + 1,
+        });
+      }
+      await lote.commit();
+
       await carregarRotas();
+      await carregarEntregas();
 
       debugPrint("Rota gerada com sucesso!");
       return true;
@@ -400,30 +472,62 @@ class DashboardController extends ChangeNotifier {
   }
 
   // --- MÉTODOS DE AÇÕES DO MOTORISTA ---
+  /// Avança o status da entrega a partir da leitura do QR Code.
+  ///
+  /// Persiste no Firestore, não só na lista em memória: antes o bip do
+  /// motorista sumia ao fechar o app, e o admin (e o assistente de IA)
+  /// continuavam vendo a entrega como Pendente para sempre.
   Future<String?> registrarBipQRCode({
     required String entregaId,
     String? nomeRecebedor,
   }) async {
     try {
+      if (empresaId == null) return "Empresa não identificada.";
+
       final index = _entregas.indexWhere((e) => e['id'] == entregaId);
-      if (index != -1) {
-        if (_entregas[index]['status'] == 'Pendente') {
-          _entregas[index]['status'] = 'Em Rota';
-          notifyListeners();
-          return "Status alterado para: Em Rota";
-        } else if (_entregas[index]['status'] == 'Em Rota' || _entregas[index]['status'] == 'A Caminho') {
-          _entregas[index]['status'] = 'Entregue';
-          if (nomeRecebedor != null && nomeRecebedor.isNotEmpty) {
-            _entregas[index]['recebedor'] = nomeRecebedor;
-          }
-          notifyListeners();
-          return "Entrega concluída com sucesso!";
-        } else {
-          return "Esta entrega já foi finalizada.";
+      if (index == -1) return "Entrega não encontrada.";
+
+      final entrega = _entregas[index];
+
+      // A entrega precisa ser da empresa do usuário logado. Sem esta
+      // checagem, um motorista dava baixa em entrega de outra empresa só
+      // sabendo o código — e as regras do Firestore recusariam a escrita.
+      if (entrega['empresaId'] != empresaId) return "Entrega não encontrada.";
+
+      final docId = (entrega['docId'] ?? '').toString();
+      if (docId.isEmpty) return "Entrega sem referência no banco de dados.";
+
+      final statusAtual = (entrega['status'] ?? 'Pendente').toString();
+      final Map<String, dynamic> alteracoes = {};
+      final String mensagem;
+
+      if (statusAtual == 'Pendente') {
+        alteracoes['status'] = 'Em Rota';
+        alteracoes['saiuParaEntregaEm'] = FieldValue.serverTimestamp();
+        mensagem = "Status alterado para: Em Rota";
+      } else if (statusAtual == 'Em Rota' || statusAtual == 'A Caminho') {
+        alteracoes['status'] = 'Entregue';
+        alteracoes['entregueEm'] = FieldValue.serverTimestamp();
+        if (nomeRecebedor != null && nomeRecebedor.isNotEmpty) {
+          alteracoes['recebedor'] = nomeRecebedor;
         }
+        mensagem = "Entrega concluída com sucesso!";
+      } else {
+        return "Esta entrega já foi finalizada.";
       }
-      return "Entrega não encontrada.";
+
+      await _firestore.collection('entregas').doc(docId).update(alteracoes);
+
+      // Espelha localmente só depois de o Firestore confirmar. O
+      // serverTimestamp não tem valor no cliente, por isso não é copiado.
+      alteracoes.remove('saiuParaEntregaEm');
+      alteracoes.remove('entregueEm');
+      _entregas[index] = {...entrega, ...alteracoes};
+
+      if (!_descartado) notifyListeners();
+      return mensagem;
     } catch (e) {
+      debugPrint("ERRO em registrarBipQRCode: $e");
       return "Erro ao processar o QR Code.";
     }
   }
