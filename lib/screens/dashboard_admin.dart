@@ -8,7 +8,6 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../controllers/dashboard_controller.dart';
-import '../services/chat_service.dart';
 import '../theme/app_theme.dart';
 import 'chat_assistente.dart';
 import '../services/maps_service.dart';
@@ -25,10 +24,9 @@ class _DashboardAdminState extends State<DashboardAdmin> {
   String _zonaSelecionada = "TODAS";
   DateTime? _dataSelecionada;
 
-  final TextEditingController _promptController = TextEditingController();
-  final ChatService _chatService = ChatService();
-  String _respostaIA = "";
-  bool _carregandoIA = false;
+  // Removidos: _promptController, _chatService, _respostaIA e _carregandoIA.
+  // Sobras do painel "AI Insights", que saiu da tela. O assistente hoje vive
+  // em ChatAssistenteScreen, que instancia o próprio ChatService.
 
   final List<String> _titulosAbas = [
     "Dashboard",
@@ -54,7 +52,6 @@ class _DashboardAdminState extends State<DashboardAdmin> {
 
   @override
   void dispose() {
-    _promptController.dispose();
     super.dispose();
   }
 
@@ -700,11 +697,13 @@ class _DashboardAdminState extends State<DashboardAdmin> {
                                 'motorista': nomeMotoristaFinal,
                                 'motoristaId': idMotoristaFinal,
                                 'status': 'Pendente',
+                                // Sem esta data não há como calcular atraso:
+                                // o assistente respondia "0 atrasadas" sempre.
+                                'criadoEm': FieldValue.serverTimestamp(),
                               });
 
-                              final idCurto =
-                                  "ENT-${docRef.id.substring(0, 4).toUpperCase()}";
-                              await docRef.update({'id': idCurto});
+                              await docRef
+                                  .update({'id': codigoEntrega(docRef.id)});
 
                               // 3. Atualiza os dados no controller para refletir nas telas
                               await controller.carregarEntregas();

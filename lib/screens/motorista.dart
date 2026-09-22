@@ -29,47 +29,10 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
     "Perfil"
   ];
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // FUNÇÃO AUXILIAR: Atualiza o status buscando pelo código amigável (ex: ENT-9YKM)
-  // ─────────────────────────────────────────────────────────────────────────
-  Future<void> _atualizarStatusPorCodigoAmigavel(BuildContext ctx, String codigoAmigavel, String novoStatus) async {
-    try {
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('entregas')
-          .where('Id', isEqualTo: codigoAmigavel)
-          .get();
-
-      if (querySnapshot.docs.isNotEmpty) {
-        final docIdReal = querySnapshot.docs.first.id;
-
-        await FirebaseFirestore.instance
-            .collection('entregas')
-            .doc(docIdReal)
-            .update({'status': novoStatus});
-
-        if (ctx.mounted) {
-          Navigator.pop(ctx);
-          ScaffoldMessenger.of(ctx).showSnackBar(
-            SnackBar(content: Text("Status atualizado para: $novoStatus")),
-          );
-        }
-      } else {
-        if (ctx.mounted) {
-          ScaffoldMessenger.of(ctx).showSnackBar(
-            SnackBar(content: Text("Erro: Nenhuma entrega encontrada com o ID $codigoAmigavel")),
-          );
-        }
-      }
-    } catch (e) {
-      print("🚨 ERRO AO ALTERAR STATUS: $e");
-      if (ctx.mounted) {
-        ScaffoldMessenger.of(ctx).showSnackBar(
-          SnackBar(content: Text("Erro ao alterar status: $e")),
-        );
-      }
-    }
-  }
-
+  // Removido: _atualizarStatusPorCodigoAmigavel.
+  // Era o resto de um fluxo de leitura de QR Code que não existe mais — o
+  // pacote mobile_scanner segue no pubspec, mas nenhuma tela o importa.
+  // O status é alterado por _botaoAlterarStatus, na aba "Minhas Entregas".
 
   @override
   Widget build(BuildContext context) {
@@ -994,11 +957,17 @@ class _DashboardMotoristaState extends State<DashboardMotorista> {
       ),
       onPressed: () async {
         try {
-          // 1. Atualiza o status no Firestore usando o ID do documento
+          // 1. Atualiza o status no Firestore usando o ID do documento.
+          // A data de conclusão alimenta o histórico e o assistente de IA,
+          // que sem ela não consegue responder quando algo foi entregue.
           await FirebaseFirestore.instance
               .collection('entregas')
               .doc(docId)
-              .update({'status': novoStatus});
+              .update({
+            'status': novoStatus,
+            if (novoStatus == 'Entregue')
+              'entregueEm': FieldValue.serverTimestamp(),
+          });
 
           // 2. Se mudou para "Em Rota", envia o e-mail de rastreio direto pelo app
           if (novoStatus == 'Em Rota') {

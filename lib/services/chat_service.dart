@@ -20,10 +20,15 @@ import 'package:http/http.dart' as http;
 import '../models/chat_resposta.dart';
 
 class ChatService {
-  /// Base do Worker publicado na Cloudflare.
-  static const String baseUrl = 'https://smartlog-ai.smartlogopenai.workers.dev';
+  /// Base da Cloud Function publicada no projeto smartlog-b9b37.
+  ///
+  /// Substituiu o Cloudflare Worker: a conta que hospedava o worker antigo
+  /// (smartlog-ai.smartlogopenai.workers.dev) não está mais acessível, e
+  /// ele seguiria servindo a versão com os bugs de leitura do Firestore.
+  static const String baseUrl =
+      'https://southamerica-east1-smartlog-b9b37.cloudfunctions.net';
 
-  /// Endpoint do assistente.
+  /// Endpoint do assistente — o nome da função exportada em functions/.
   static const String caminhoChat = '/chat';
 
   /// Mesmo teto que o backend aplica por requisição.
