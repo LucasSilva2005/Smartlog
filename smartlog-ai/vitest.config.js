@@ -5,10 +5,12 @@ import {defineConfig} from "vitest/config";
 // no Node mesmo. O pool do workerd rejeita nome de teste com acento no
 // header MF-Vitest-Source e inunda a saída de avisos.
 //
-// Para testes que precisem do runtime real (fetch handler, bindings):
-//   npx vitest --config vitest.workers.config.js
+// Testes que precisam do runtime real (fetch handler, bindings) ficam em
+// test/endpoints.spec.js, excluído aqui, e rodam com:
+//   npm run test:workers
 export default defineConfig({
   test: {
     include: ["test/**/*.spec.js"],
+    exclude: ["test/endpoints.spec.js", "**/node_modules/**"],
   },
 });
